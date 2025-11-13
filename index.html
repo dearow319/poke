@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>포켓몬 실전 데미지 계산기 (커스텀)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="logo-chip">NUO-like</div>
+        <div class="title">
+          <span class="title-main">포켓몬 랭크 배틀 계산기</span>
+          <span class="title-sub">스마트누오 스타일 · 싱글 배틀 · 커스텀 기능</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="pill pill-soft">Gen 9 대응</span>
+        <span class="pill pill-outline">커스텀 로그 · 덱</span>
+      </div>
+    </header>
+
+    <!-- 1. 엔트리 입력 -->
+    <section class="section">
+      <div class="section-header">
+        <span class="section-index">①</span>
+        <h2>엔트리 입력</h2>
+        <p>공격측 · 수비측 포켓몬, 스탯, 아이템, 상태를 입력합니다.</p>
+      </div>
+
+      <div class="entry-grid">
+        <!-- 공격측 -->
+        <article class="entry-card">
+          <div class="entry-head">
+            <div class="side-label atk">공격측</div>
+            <div class="side-main">
+              <div class="row-inline">
+                <div class="field flex-1 sbox">
+                  <label for="atkSearch">포켓몬 검색</label>
+                  <input id="atkSearch" class="input" placeholder="포켓몬 이름 (한글)" />
+                  <div id="atkSuggest" class="suggest"></div>
+                </div>
+                <div class="field level-field">
+                  <label for="atkLevel">Lv.</label>
+                  <input id="atkLevel" class="input" type="number" min="1" max="100" value="50" />
+                </div>
+              </div>
+              <div class="row-inline">
+                <div class="field flex-1">
+                  <label for="atkName">표시 이름</label>
+                  <input id="atkName" class="input" placeholder="예: 피카츄" />
+                </div>
+                <div class="field type-short">
+                  <label for="atkType1">타입1</label>
+                  <input id="atkType1" class="input" placeholder="전기" />
+                </div>
+                <div class="field type-short">
+                  <label for="atkType2">타입2</label>
+                  <input id="atkType2" class="input" placeholder="-" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="entry-body">
+            <div class="row-inline">
+              <div class="field flex-2">
+                <label>HP</label>
+                <div class="hp-row">
+                  <input id="atkCurHP" class="input" type="number" min="0" placeholder="현재" />
+                  <span class="hp-slash">/</span>
+                  <input id="atkHP" class="input" type="number" min="1" placeholder="최대" />
+                </div>
+              </div>
+            </div>
+
+            <div class="row-inline">
+              <div class="field">
+                <label for="atkA">공격</label>
+                <input id="atkA" class="input" type="number" min="1" />
+              </div>
+              <div class="field">
+                <label for="atkB">방어</label>
+                <input id="atkB" class="input" type="number" min="1" />
+              </div>
+              <div class="field">
+                <label for="atkS">스피드</label>
+                <input id="atkS" class="input" type="number" min="1" />
+              </div>
+            </div>
+
+            <div class="row-inline">
+              <div class="field flex-2">
+                <label for="atkAbility">특성</label>
+                <input id="atkAbility" class="input" placeholder="자동 입력 / 직접 입력" />
+              </div>
+              <div class="field flex-1">
+                <label for="atkItem">지닌 물건</label>
+                <select id="atkItem" class="input">
+                  <option value="없음">없음</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="row-inline">
+              <div class="field">
+                <label for="atkStatus">상태 이상</label>
+                <select id="atkStatus" class="input">
+                  <option>없음</option>
+                  <option>독</option>
+                  <option>맹독</option>
+                  <option>화상</option>
+                  <option>마비</option>
+                  <option>수면</option>
+                  <option>얼음</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="atkStab">STAB 처리</label>
+                <select id="atkStab" class="input">
+                  <option>자동</option>
+                  <option>끄기</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="atkGuts">근성 보정</label>
+                <select id="atkGuts" class="input">
+                  <option>아니오</option>
+                  <option>예</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- 수비측 -->
+        <article class="entry-card">
+          <div class="entry-head">
+            <div class="side-label def">수비측</div>
+            <div class="side-main">
+              <div class="row-inline">
+                <div class="field flex-1 sbox">
+                  <label for="defSearch">포켓몬 검색</label>
+                  <input id="defSearch" class="input" placeholder="포켓몬 이름 (한글)" />
+                  <div id="defSuggest" class="suggest"></div>
+                </div>
+                <div class="field level-field">
+                  <label for="defLevel">Lv.</label>
+                  <input id="defLevel" class="input" type="number" min="1" max="100" value="50" />
+                </div>
+              </div>
+              <div class="row-inline">
+                <div class="field flex-1">
+                  <label for="defName">표시 이름</label>
+                  <input id="defName" class="input" placeholder="예: 잠만보" />
+                </div>
+                <div class="field type-short">
+                  <label for="defType1">타입1</label>
+                  <input id="defType1" class="input" placeholder="노말" />
+                </div>
+                <div class="field type-short">
+                  <label for="defType2">타입2</label>
+                  <input id="defType2" class="input" placeholder="-" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="entry-body">
+            <div class="row-inline">
+              <div class="field flex-2">
+                <label>HP</label>
+                <div class="hp-row">
+                  <input id="defCurHP" class="input" type="number" min="0" placeholder="현재" />
+                  <span class="hp-slash">/</span>
+                  <input id="defHP" class="input" type="number" min="1" placeholder="최대" />
+                </div>
+              </div>
+            </div>
+
+            <div class="row-inline">
+              <div class="field">
+                <label for="defA">공격</label>
+                <input id="defA" class="input" type="number" min="1" />
+              </div>
+              <div class="field">
+                <label for="defB">방어</label>
+                <input id="defB" class="input" type="number" min="1" />
+              </div>
+              <div class="field">
+                <label for="defS">스피드</label>
+                <input id="defS" class="input" type="number" min="1" />
+              </div>
+            </div>
+
+            <div class="row-inline">
+              <div class="field flex-2">
+                <label for="defAbility">특성</label>
+                <input id="defAbility" class="input" placeholder="자동 입력 / 직접 입력" />
+              </div>
+              <div class="field flex-1">
+                <label for="defItem">지닌 물건</label>
+                <select id="defItem" class="input">
+                  <option value="없음">없음</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="row-inline">
+              <div class="field">
+                <label for="defStatus">상태 이상</label>
+                <select id="defStatus" class="input">
+                  <option>없음</option>
+                  <option>독</option>
+                  <option>맹독</option>
+                  <option>화상</option>
+                  <option>마비</option>
+                  <option>수면</option>
+                  <option>얼음</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <button id="swapAtk" class="btn-ghost small-btn">공격측 교체</button>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <button id="swapDef" class="btn-ghost small-btn">수비측 교체</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 2. 환경 · 기술 -->
+    <section class="section">
+      <div class="section-header">
+        <span class="section-index">②</span>
+        <h2>환경 · 기술 입력</h2>
+        <p>날씨와 기술 정보를 입력하고 데미지를 계산합니다.</p>
+      </div>
+
+      <div class="env-card">
+        <div class="row-inline">
+          <div class="field">
+            <label for="weather">날씨</label>
+            <select id="weather" class="input">
+              <option>없음</option>
+              <option>쾌청</option>
+              <option>비</option>
+              <option>모래바람</option>
+              <option>싸라기눈</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="moveName">기술명</label>
+            <div class="sbox">
+              <input id="moveName" class="input" placeholder="기술 이름 (한글)" />
+              <div id="moveSuggest" class="suggest"></div>
+            </div>
+          </div>
+          <div class="field type-short">
+            <label for="moveType">타입</label>
+            <input id="moveType" class="input" placeholder="예: 불꽃" />
+          </div>
+          <div class="field">
+            <label for="moveCat">분류</label>
+            <select id="moveCat" class="input">
+              <option>물리</option>
+              <option>특수</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="movePower">위력</label>
+            <input id="movePower" class="input" type="number" min="1" />
+          </div>
+          <div class="field">
+            <label for="isCrit">급소</label>
+            <select id="isCrit" class="input">
+              <option>아니오</option>
+              <option>예</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="moveMod">기타 배율</label>
+            <input id="moveMod" class="input" type="number" step="0.01" value="1.0" />
+          </div>
+        </div>
+        <div class="env-foot">
+          <div class="eff-indicator">
+            <span class="label">현재 상성</span>
+            <span id="effNow" class="pill pill-soft">-</span>
+          </div>
+          <div class="env-buttons">
+            <button id="btnCalc" class="btn-main">데미지 계산</button>
+            <button id="btnRoll" class="btn-sub">랜덤 롤 1회</button>
+            <button id="btnApply" class="btn-sub">피해 적용(수비)</button>
+            <button id="btnTurn" class="btn-sub">턴 종료 처리</button>
+            <button id="btnSwap" class="btn-ghost">공/수 교대</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 결과 -->
+    <section class="section">
+      <div class="section-header">
+        <span class="section-index">③</span>
+        <h2>계산 결과</h2>
+        <p>이번 턴 로그와 누적 히스토리만 간단히 확인합니다.</p>
+      </div>
+      <div class="result-grid">
+        <div class="log-card">
+          <div class="log-header">
+            <span>이번 턴 로그</span>
+            <div class="log-actions">
+              <button id="btnClear" class="btn-ghost small-btn">히스토리 클리어</button>
+            </div>
+          </div>
+          <pre id="outLog" class="log"></pre>
+        </div>
+      </div>
+
+      <div class="hist-card">
+        <div class="hist-header">
+          <span>배틀 히스토리</span>
+        </div>
+        <pre id="hist" class="log hist-log"></pre>
+      </div>
+    </section>
+
+    <!-- 4. 덱 관리 -->
+    <section class="section">
+      <div class="section-header">
+        <span class="section-index">④</span>
+        <h2>덱 / 샘플 관리</h2>
+        <p>자주 쓰는 조합은 로컬 저장해 두고 공격측/수비측에 따로 불러올 수 있습니다.</p>
+      </div>
+
+      <div class="deck-card">
+        <div class="row-inline">
+          <div class="field flex-1">
+            <label for="slotName">저장 이름</label>
+            <input id="slotName" class="input" placeholder="예: 피카츄 vs 망나뇽" />
+          </div>
+          <div class="field flex-1">
+            <label for="deckList">저장된 덱</label>
+            <select id="deckList" class="input">
+              <option value="">저장된 덱 없음</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="deck-buttons">
+          <button id="btnSave" class="btn-main">현재 상태 저장</button>
+          <button id="btnLoadSel" class="btn-sub">선택 덱 전체 불러오기</button>
+          <button id="btnLoadAtk" class="btn-sub">선택 덱-공격측에</button>
+          <button id="btnLoadDef" class="btn-sub">선택 덱-수비측에</button>
+          <button id="btnDelDeck" class="btn-danger">선택 덱 삭제</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span id="koFillStatus" class="footer-text">포켓몬/기술/아이템 데이터 로딩 중… (최초 1회만 다소 오래 걸릴 수 있습니다)</span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
