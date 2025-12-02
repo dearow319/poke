@@ -1,1020 +1,1668 @@
-// ---- 타입, 상성, 공통 유틸 ----
-const TYPE_KO_TO_EN={
-  "노말":"Normal","불꽃":"Fire","물":"Water","전기":"Electric","풀":"Grass","얼음":"Ice",
-  "격투":"Fighting","독":"Poison","땅":"Ground","비행":"Flying","에스퍼":"Psychic",
-  "벌레":"Bug","바위":"Rock","고스트":"Ghost","드래곤":"Dragon","악":"Dark",
-  "강철":"Steel","페어리":"Fairy",
-  "Normal":"Normal","Fire":"Fire","Water":"Water","Electric":"Electric","Grass":"Grass","Ice":"Ice",
-  "Fighting":"Fighting","Poison":"Poison","Ground":"Ground","Flying":"Flying","Psychic":"Psychic",
-  "Bug":"Bug","Rock":"Rock","Ghost":"Ghost","Dragon":"Dragon","Dark":"Dark","Steel":"Steel","Fairy":"Fairy"
-};
-const TYPE_EN_TO_KO = Object.fromEntries(
-  Object.entries(TYPE_KO_TO_EN)
-    .map(([k,v])=>[v,k])
-    .filter(([k,_],i,self)=>self.findIndex(([x,_y])=>x===k)===i)
-);
+// ===================== 기본 상수/유틸 =====================
 
-const TYPE_CHART={
-  Normal:{Rock:.5,Ghost:0,Steel:.5},
-  Fire:{Fire:.5,Water:.5,Rock:.5,Dragon:.5,Grass:2,Ice:2,Bug:2,Steel:2},
-  Water:{Water:.5,Grass:.5,Dragon:.5,Fire:2,Ground:2,Rock:2},
-  Electric:{Electric:.5,Grass:.5,Dragon:.5,Ground:0,Water:2,Flying:2},
-  Grass:{Fire:.5,Grass:.5,Poison:.5,Flying:.5,Bug:.5,Dragon:.5,Steel:.5,Water:2,Ground:2,Rock:2},
-  Ice:{Fire:.5,Water:.5,Ice:.5,Steel:.5,Grass:2,Ground:2,Flying:2,Dragon:2},
-  Fighting:{Poison:.5,Flying:.5,Psychic:.5,Bug:.5,Fairy:.5,Ghost:0,Normal:2,Ice:2,Rock:2,Dark:2,Steel:2},
-  Poison:{Poison:.5,Ground:.5,Rock:.5,Ghost:.5,Steel:0,Grass:2,Fairy:2},
-  Ground:{Grass:.5,Bug:.5,Flying:0,Fire:2,Electric:2,Poison:2,Rock:2,Steel:2},
-  Flying:{Electric:.5,Rock:.5,Steel:.5,Grass:2,Fighting:2,Bug:2,Ground:1},
-  Psychic:{Psychic:.5,Steel:.5,Dark:0,Fighting:2,Poison:2},
-  Bug:{Fire:.5,Fighting:.5,Poison:.5,Flying:.5,Ghost:.5,Steel:.5,Fairy:.5,Grass:2,Psychic:2,Dark:2},
-  Rock:{Fighting:.5,Ground:.5,Steel:.5,Fire:2,Ice:2,Flying:2,Bug:2},
-  Ghost:{Dark:.5,Normal:0,Psychic:2,Ghost:2},
-  Dragon:{Steel:.5,Fairy:0,Dragon:2},
-  Dark:{Fighting:.5,Dark:.5,Fairy:.5,Psychic:2,Ghost:2},
-  Steel:{Fire:.5,Water:.5,Electric:.5,Steel:.5,Ice:2,Rock:2,Fairy:2},
-  Fairy:{Fire:.5,Poison:.5,Steel:.5,Fighting:2,Dragon:2,Dark:2}
-};
-
-const API_BASE="https://pokeapi.co/api/v2";
-const ROLLS = Array.from({length:16},(_,i)=>(85+i)/100);
-const num = v => Number(v??0)||0;
-const cache={
-  koPokeList:[],
-  koMoveList:[],
-  ko2enPoke:{},
-  en2koPoke:{},
-  ko2enMove:{},
-  en2koMove:{},
-  baseStats:{},
-  abilityKo:{},
-  abilityEn:{},
-  heldItemList:[],
-  itemKo2En:{},
-  itemEn2Ko:{}
-};
-const itemUsed={atk:false,def:false};
-let toxicStage={atk:0,def:0}; // 맹독 스택은 양측 별도 관리
-
-function strip(s){return (s||"").toLowerCase().replace(/\s+/g,"");}
-function cap(s){return (s||"").charAt(0).toUpperCase()+(s||"").slice(1);}
-function el(id){return document.getElementById(id);}
-function pct(x){return Math.round(x*100)+"%";}
-function toENType(v){const t=(v||"").trim();return TYPE_KO_TO_EN[t]||cap(t.toLowerCase());}
-
-// 한글 조사 처리
-function hasBatchim(word){
-  if(!word) return false;
-  for(let i=word.length-1;i>=0;i--){
-    const ch=word.charCodeAt(i);
-    if(ch<0xac00 || ch>0xd7a3) continue;
-    const jong = (ch - 0xac00) % 28;
-    return jong>0;
-  }
-  return false;
-}
-function withParticle(word, pBatchim, pNoBatchim){
-  return word + (hasBatchim(word)?pBatchim:pNoBatchim);
-}
-
-function persist(){
-  try{
-    for(const k of [
-      "koPokeList","koMoveList",
-      "ko2enPoke","en2koPoke",
-      "ko2enMove","en2koMove",
-      "baseStats","abilityKo","abilityEn",
-      "heldItemList","itemKo2En","itemEn2Ko"
-    ]){
-      localStorage.setItem(k,JSON.stringify(cache[k]));
-    }
-  }catch{}
-}
-
-// ---- PokéAPI ----
-async function fetchPokemonList(){
-  const key="pb-list-2000";
-  try{const c=localStorage.getItem(key);if(c)return JSON.parse(c);}catch{}
-  const r=await fetch(`${API_BASE}/pokemon?limit=2000`);
-  const d=await r.json();
-  localStorage.setItem(key,JSON.stringify(d.results));
-  return d.results;
-}
-async function fetchPokemon(en){
-  const k=`pb-poke-${en}`;
-  try{const c=localStorage.getItem(k);if(c)return JSON.parse(c);}catch{}
-  const r=await fetch(`${API_BASE}/pokemon/${en}`);
-  const d=await r.json();
-  localStorage.setItem(k,JSON.stringify(d));
-  return d;
-}
-async function fetchSpecies(en){
-  const k=`pb-species-${en}`;
-  try{const c=localStorage.getItem(k);if(c)return JSON.parse(c);}catch{}
-  const p=await fetchPokemon(en);
-  const r=await fetch(p.species.url);
-  const d=await r.json();
-  localStorage.setItem(k,JSON.stringify(d));
-  return d;
-}
-async function fetchMoveList(){
-  const key="pb-move-list-2000";
-  try{const c=localStorage.getItem(key);if(c)return JSON.parse(c);}catch{}
-  const r=await fetch(`${API_BASE}/move?limit=2000`);
-  const d=await r.json();
-  localStorage.setItem(key,JSON.stringify(d.results));
-  return d.results;
-}
-async function fetchMove(en){
-  const k=`pb-move-${en}`;
-  try{const c=localStorage.getItem(k);if(c)return JSON.parse(c);}catch{}
-  const r=await fetch(`${API_BASE}/move/${en}`);
-  const d=await r.json();
-  localStorage.setItem(k,JSON.stringify(d));
-  return d;
-}
-async function fetchAbility(en){
-  const k=`pb-ability-${en}`;
-  try{const c=localStorage.getItem(k);if(c)return JSON.parse(c);}catch{}
-  const r=await fetch(`${API_BASE}/ability/${en}`);
-  const d=await r.json();
-  localStorage.setItem(k,JSON.stringify(d));
-  return d;
-}
-async function fetchItem(nameOrUrl){
-  let keyName;
-  if(typeof nameOrUrl==="string" && !nameOrUrl.startsWith("http")){
-    keyName=nameOrUrl;
-  }else{
-    const parts=String(nameOrUrl).split("/").filter(Boolean);
-    keyName=parts[parts.length-1];
-  }
-  const k=`pb-item-${keyName}`;
-  try{const c=localStorage.getItem(k);if(c)return JSON.parse(c);}catch{}
-  const r=await fetch(typeof nameOrUrl==="string" && !nameOrUrl.startsWith("http") ? `${API_BASE}/item/${keyName}` : nameOrUrl);
-  const d=await r.json();
-  localStorage.setItem(k,JSON.stringify(d));
-  return d;
-}
-
-// ---- 한글 리스트 로딩 ----
-async function preloadKOLists(){
-  try{
-    Object.assign(cache,{
-      koPokeList:JSON.parse(localStorage.getItem("koPokeList")||"[]"),
-      koMoveList:JSON.parse(localStorage.getItem("koMoveList")||"[]"),
-      ko2enPoke:JSON.parse(localStorage.getItem("ko2enPoke")||"{}"),
-      en2koPoke:JSON.parse(localStorage.getItem("en2koPoke")||"{}"),
-      ko2enMove:JSON.parse(localStorage.getItem("ko2enMove")||"{}"),
-      en2koMove:JSON.parse(localStorage.getItem("en2koMove")||"{}"),
-      baseStats:JSON.parse(localStorage.getItem("baseStats")||"{}"),
-      abilityKo:JSON.parse(localStorage.getItem("abilityKo")||"{}"),
-      abilityEn:JSON.parse(localStorage.getItem("abilityEn")||"{}"),
-      heldItemList:JSON.parse(localStorage.getItem("heldItemList")||"[]"),
-      itemKo2En:JSON.parse(localStorage.getItem("itemKo2En")||"{}"),
-      itemEn2Ko:JSON.parse(localStorage.getItem("itemEn2Ko")||"{}")
+const DEFAULT_ROSTER = (() => {
+  const arr = [];
+  for (let t = 1; t <= 30; t++) {
+    arr.push({
+      name: `트레이너${t}`,
+      team: [1, 2, 3, 4, 5, 6].map(i => ({
+        origName: `포켓몬${i}`,
+        nickName: `포켓몬${i}`,
+      })),
     });
-  }catch{}
-  refreshDeckList();
-  if(cache.heldItemList && cache.heldItemList.length){
-    populateItemSelects();
   }
-  buildKoPokeListBatched().catch(()=>{});
-  buildKoMoveListBatched().catch(()=>{});
-  buildHeldItemListBatched().catch(()=>{});
+  return arr;
+})();
+
+const TYPES = [
+  "노말","불꽃","물","전기","풀","얼음","격투","독","땅","비행",
+  "에스퍼","벌레","바위","고스트","드래곤","악","강철","페어리"
+];
+
+// 타입 상성(공격->방어)
+const TYPE_CHART = (() => {
+  const M = {};
+  const set = (atk, def, mul) => { (M[atk] ??= {})[def] = mul; };
+
+  set("노말","바위",0.5); set("노말","강철",0.5); set("노말","고스트",0);
+
+  ["풀","얼음","벌레","강철"].forEach(d=>set("불꽃",d,2));
+  ["불꽃","물","바위","드래곤"].forEach(d=>set("불꽃",d,0.5));
+
+  ["불꽃","땅","바위"].forEach(d=>set("물",d,2));
+  ["물","풀","드래곤"].forEach(d=>set("물",d,0.5));
+
+  ["물","비행"].forEach(d=>set("전기",d,2));
+  ["전기","풀","드래곤"].forEach(d=>set("전기",d,0.5));
+  set("전기","땅",0);
+
+  ["물","땅","바위"].forEach(d=>set("풀",d,2));
+  ["불꽃","풀","독","비행","벌레","드래곤","강철"].forEach(d=>set("풀",d,0.5));
+
+  ["풀","땅","비행","드래곤"].forEach(d=>set("얼음",d,2));
+  ["불꽃","물","얼음","강철"].forEach(d=>set("얼음",d,0.5));
+
+  ["노말","얼음","바위","악","강철"].forEach(d=>set("격투",d,2));
+  ["독","비행","에스퍼","벌레","페어리"].forEach(d=>set("격투",d,0.5));
+  set("격투","고스트",0);
+
+  ["풀","페어리"].forEach(d=>set("독",d,2));
+  ["독","땅","바위","고스트"].forEach(d=>set("독",d,0.5));
+  set("독","강철",0);
+
+  ["불꽃","전기","독","바위","강철"].forEach(d=>set("땅",d,2));
+  ["풀","벌레"].forEach(d=>set("땅",d,0.5));
+  set("땅","비행",0);
+
+  ["풀","격투","벌레"].forEach(d=>set("비행",d,2));
+  ["전기","바위","강철"].forEach(d=>set("비행",d,0.5));
+
+  ["격투","독"].forEach(d=>set("에스퍼",d,2));
+  ["에스퍼","강철"].forEach(d=>set("에스퍼",d,0.5));
+  set("에스퍼","악",0);
+
+  ["풀","에스퍼","악"].forEach(d=>set("벌레",d,2));
+  ["불꽃","격투","독","비행","고스트","강철","페어리"].forEach(d=>set("벌레",d,0.5));
+
+  ["불꽃","얼음","비행","벌레"].forEach(d=>set("바위",d,2));
+  ["격투","땅","강철"].forEach(d=>set("바위",d,0.5));
+
+  ["에스퍼","고스트"].forEach(d=>set("고스트",d,2));
+  set("고스트","악",0.5);
+  set("고스트","노말",0);
+
+  set("드래곤","드래곤",2);
+  set("드래곤","강철",0.5);
+  set("드래곤","페어리",0);
+
+  ["에스퍼","고스트"].forEach(d=>set("악",d,2));
+  ["격투","악","페어리"].forEach(d=>set("악",d,0.5));
+
+  ["얼음","바위","페어리"].forEach(d=>set("강철",d,2));
+  ["불꽃","물","전기","강철"].forEach(d=>set("강철",d,0.5));
+
+  ["격투","드래곤","악"].forEach(d=>set("페어리",d,2));
+  ["불꽃","독","강철"].forEach(d=>set("페어리",d,0.5));
+
+  return M;
+})();
+
+function typeMul(atkType, defType){
+  return (TYPE_CHART[atkType] && TYPE_CHART[atkType][defType] != null) ? TYPE_CHART[atkType][defType] : 1;
+}
+function typeEffect(atkType, def1, def2){
+  const m1 = def1 ? typeMul(atkType, def1) : 1;
+  const m2 = def2 ? typeMul(atkType, def2) : 1;
+  return m1*m2;
+}
+function effText(eff){
+  if (eff === 0) return "효과가 없다!";
+  if (eff >= 2) return "효과가 굉장했다!";
+  if (eff > 1) return "효과가 제법 있는 편이다!";
+  if (eff === 1) return "";
+  return "효과가 별로다...";
 }
 
-async function buildKoPokeListBatched(batch=150){
-  const status=el("koFillStatus");
-  const list=await fetchPokemonList();
-  const total=list.length;
-  for(let i=0;i<total;i++){
-    const en=list[i].name;
-    if(!cache.en2koPoke[en]){
-      try{
-        const sp=await fetchSpecies(en);
-        const ko=(sp.names||[]).find(n=>n.language?.name==="ko")?.name;
-        if(ko){
-          cache.en2koPoke[en]=ko;
-          cache.ko2enPoke[ko]=en;
-          cache.koPokeList.push(ko);
-        }
-      }catch{}
-    }else{
-      const ko=cache.en2koPoke[en];
-      if(ko && !cache.koPokeList.includes(ko)) cache.koPokeList.push(ko);
-    }
-    if(!cache.baseStats[en]){
-      try{
-        const p=await fetchPokemon(en);
-        const s={};
-        p.stats.forEach(st=>s[st.stat.name]=st.base_stat);
-        cache.baseStats[en]={hp:s.hp,atk:s["attack"],def:s["defense"],spa:s["special-attack"],spd:s["special-defense"],spe:s["speed"]};
-      }catch{}
-    }
-    if(i%batch===0){
-      persist();
-      if(status)status.textContent=`포켓몬 ${i+1}/${total} 로딩 중`;
-      await new Promise(r=>setTimeout(r,0));
-    }
+const STORAGE_KEY = "pkcalc_sv_best_ui_v3";
+const $ = (id) => document.getElementById(id);
+
+function escapeHtml(s){
+  return String(s)
+    .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+}
+function deepClone(obj){
+  if (typeof structuredClone === "function") return structuredClone(obj);
+  return JSON.parse(JSON.stringify(obj));
+}
+function clampInt(v, min, max){
+  const n = Number(v);
+  if(!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+function cryptoRandomId(){
+  if (globalThis.crypto?.getRandomValues){
+    const a = new Uint32Array(2);
+    crypto.getRandomValues(a);
+    return `${Date.now()}_${a[0].toString(16)}${a[1].toString(16)}`;
   }
-  persist();
-  if(status)status.textContent=`포켓몬 ${total}/${total} 로딩 완료`;
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+function baseOr100(x){
+  const s = String(x ?? "").trim();
+  if(s === "") return 100;
+  const n = Number(s);
+  if(!Number.isFinite(n)) return 100;
+  return clampInt(n, 1, 255);
+}
+function normName(s, fallback){
+  const v = String(s ?? "").trim();
+  return v ? v : fallback;
+}
+function pokeNick(p){
+  return normName(p?.nickName, normName(p?.origName, "포켓몬"));
+}
+function pokeOrig(p){
+  return normName(p?.origName, pokeNick(p));
+}
+function trainerPokeLabel(t, p){
+  return `${t.name} / ${pokeNick(p)}(${pokeOrig(p)})`;
 }
 
-async function buildKoMoveListBatched(batch=150){
-  const status=el("koFillStatus");
-  const list=await fetchMoveList();
-  const total=list.length;
-  for(let i=0;i<total;i++){
-    const en=list[i].name;
-    if(!cache.en2koMove[en]){
-      try{
-        const m=await fetchMove(en);
-        const ko=(m.names||[]).find(n=>n.language?.name==="ko")?.name;
-        if(ko){
-          cache.en2koMove[en]=ko;
-          cache.ko2enMove[ko]=en;
-          cache.koMoveList.push(ko);
-        }
-      }catch{}
-    }else{
-      const ko=cache.en2koMove[en];
-      if(ko && !cache.koMoveList.includes(ko)) cache.koMoveList.push(ko);
-    }
-    if(i%batch===0){
-      persist();
-      if(status)status.textContent=`기술 ${i+1}/${total} 로딩 중`;
-      await new Promise(r=>setTimeout(r,0));
-    }
-  }
-  persist();
-  if(status)status.textContent=`기술 목록 로딩 완료`;
+// ===================== 상태/날씨 =====================
+
+const WEATHER = [
+  { key:"none", label:"없음" },
+  { key:"sun",  label:"쾌청" },
+  { key:"rain", label:"비" },
+  { key:"sand", label:"모래바람" },
+  { key:"snow", label:"설경" },
+];
+
+const STATUS = [
+  { key:"none", label:"없음" },
+  { key:"par",  label:"마비" },
+  { key:"brn",  label:"화상" },
+  { key:"psn",  label:"독" },
+  { key:"tox",  label:"맹독" },
+  { key:"slp",  label:"잠듦" },
+  { key:"frz",  label:"얼음" },
+];
+
+function makeStatusState(){
+  return { major:"none", sleepTurns:0, toxicCount:0, flinch:false };
 }
 
-async function buildHeldItemListBatched(batch=60){
-  // 이미 있으면 그대로 사용
-  if(cache.heldItemList && cache.heldItemList.length){
-    populateItemSelects();
-    return;
-  }
-  const status=el("koFillStatus");
-  const attrs=["holdable","holdable-active","holdable-passive"];
-  const itemSet=new Set();
-  for(const attr of attrs){
-    try{
-      const key=`pb-item-attr-${attr}`;
-      let data;
-      try{
-        const c=localStorage.getItem(key);
-        if(c)data=JSON.parse(c);
-      }catch{}
-      if(!data){
-        const r=await fetch(`${API_BASE}/item-attribute/${attr}`);
-        data=await r.json();
-        localStorage.setItem(key,JSON.stringify(data));
-      }
-      (data.items||[]).forEach(it=>itemSet.add(it.name));
-    }catch{}
-  }
-  const names=[...itemSet];
-  const listKO=[];
-  for(let i=0;i<names.length;i++){
-    const en=names[i];
-    try{
-      const item=await fetchItem(en);
-      const ko=(item.names||[]).find(n=>n.language?.name==="ko")?.name || en;
-      cache.itemEn2Ko[en]=ko;
-      cache.itemKo2En[ko]=en;
-      listKO.push(ko);
-    }catch{}
-    if(i%batch===0){
-      cache.heldItemList=listKO.slice();
-      persist();
-      if(status)status.textContent=`아이템 ${i+1}/${names.length} 로딩 중`;
-      await new Promise(r=>setTimeout(r,0));
-    }
-  }
-  cache.heldItemList=listKO.slice().sort((a,b)=>a.localeCompare(b,"ko-KR"));
-  persist();
-  if(status)status.textContent=`아이템 목록 로딩 완료`;
-  populateItemSelects();
-}
+// ===================== 기본 스탯/기술 =====================
 
-function populateItemSelects(){
-  const list=cache.heldItemList||[];
-  if(!list.length)return;
-  const selects=[el("atkItem"),el("defItem")];
-  selects.forEach(sel=>{
-    if(!sel)return;
-    const current=sel.value;
-    sel.innerHTML="";
-    const none=document.createElement("option");
-    none.value="없음";
-    none.textContent="없음";
-    sel.appendChild(none);
-    list.forEach(ko=>{
-      const opt=document.createElement("option");
-      opt.value=ko;
-      opt.textContent=ko;
-      sel.appendChild(opt);
-    });
-    if(current) sel.value=current;
-  });
-}
-
-function itemKoToEn(ko){
-  if(!ko || ko==="없음")return "";
-  return cache.itemKo2En[ko] || "";
-}
-
-// ---- 추천 드롭다운 ----
-function attachSuggest(inputId, getList, onPick){
-  const input=el(inputId);
-  const boxId=inputId==="moveName"?"moveSuggest":(inputId==="atkSearch"?"atkSuggest":"defSuggest");
-  const box=el(boxId);
-  function render(q){
-    const src=getList();
-    const v=(q||"").trim();
-    if(!v){box.classList.remove("show");box.innerHTML="";return;}
-    const key=strip(v);
-    const arr=src.filter(x=>strip(x).startsWith(key)).slice(0,15);
-    if(!arr.length){box.classList.remove("show");box.innerHTML="";return;}
-    box.innerHTML=arr.map(x=>`<div data-v="${x}">${x}</div>`).join("");
-    box.classList.add("show");
-  }
-  input.addEventListener("input",e=>render(e.target.value));
-  input.addEventListener("focus",e=>render(e.target.value));
-  input.addEventListener("blur",()=>setTimeout(()=>box.classList.remove("show"),150));
-  box.addEventListener("click",e=>{
-    const v=e.target.getAttribute("data-v");
-    if(!v)return;
-    input.value=v;
-    box.classList.remove("show");
-    onPick(v);
-  });
-}
-
-// ---- 이름 해석 ----
-async function resolvePokemonKO(q){
-  if(cache.ko2enPoke[q])return{en:cache.ko2enPoke[q],ko:q};
-  const list=await fetchPokemonList();
-  for(const it of list){
-    const sp=await fetchSpecies(it.name);
-    const ko=(sp.names||[]).find(n=>n.language?.name==="ko")?.name;
-    if(ko){
-      cache.en2koPoke[it.name]=ko;
-      cache.ko2enPoke[ko]=it.name;
-      if(strip(ko)===strip(q))return{en:it.name,ko};
-    }
-  }
-  throw new Error("포켓몬을 찾을 수 없음");
-}
-async function resolveMoveKO(q){
-  if(cache.ko2enMove[q])return{en:cache.ko2enMove[q],ko:q};
-  const list=await fetchMoveList();
-  for(const it of list){
-    const m=await fetchMove(it.name);
-    const ko=(m.names||[]).find(n=>n.language?.name==="ko")?.name;
-    if(ko){
-      cache.en2koMove[it.name]=ko;
-      cache.ko2enMove[ko]=it.name;
-      if(strip(ko)===strip(q))return{en:it.name,ko};
-    }
-  }
-  throw new Error("기술을 찾을 수 없음");
-}
-
-// ---- 스탯, 데미지 계산 ----
-function calcHP(base,iv,ev,lvl){
-  if(base<=1)return 1;
-  return Math.floor(((2*base+iv+Math.floor(ev/4))*lvl)/100)+lvl+10;
-}
-function calcOther(base,iv,ev,lvl,nature=1.0){
-  const v=Math.floor(((2*base+iv+Math.floor(ev/4))*lvl)/100)+5;
-  return Math.floor(v*nature);
-}
-function typeMultiplier(moveTypeEN,defTypesEN){
-  let m=1.0;
-  for(const dt of defTypesEN){
-    const row=TYPE_CHART[moveTypeEN]||{};
-    m*=(row?.[dt]??1.0);
-  }
-  return m;
-}
-function stabMultiplier(moveTypeEN,atkTypesEN,modeKO){
-  if(modeKO==="끄기")return 1.0;
-  return atkTypesEN.includes(moveTypeEN)?1.5:1.0;
-}
-function burnMultiplier(categoryKO,isBurn,hasGuts){
-  const cat=(categoryKO==="물리")?"Physical":"Special";
-  if(cat==="Physical"&&isBurn&&!hasGuts)return 0.5;
-  return 1.0;
-}
-function critMultiplier(isCrit){return isCrit?1.5:1.0;}
-function weatherMultiplier(moveTypeEN,weatherKO){
-  if(weatherKO==="쾌청"){
-    if(moveTypeEN==="Fire")return 1.5;
-    if(moveTypeEN==="Water")return 0.5;
-  }
-  if(weatherKO==="비"){
-    if(moveTypeEN==="Water")return 1.5;
-    if(moveTypeEN==="Fire")return 0.5;
-  }
-  return 1.0;
-}
-function screenMultiplier(){ return 1.0; } // 싱글 기준, 스크린은 옵션화 가능
-
-function computeDamage({level,power,attack,defense,categoryKO,moveTypeEN,atkTypesEN,defTypesEN,opts}){
-  const {
-    isCrit,
-    stabModeKO,
-    isBurn,
-    hasGuts,
-    weatherKO="없음",
-    isStatused=false,
-    moveNameEN="",
-    moveMod=1.0
-  }=opts||{};
-  let pow=power;
-  // Facade(객기) 계열: 상태이상 시 위력 2배(간이)
-  if(isStatused && /facade|객기/i.test(moveNameEN))pow=power*2;
-
-  const base=Math.floor(Math.floor(((2*level)/5+2)*pow*(attack)/Math.max(1,defense))/50)+2;
-  const burn=(/facade|객기/i.test(moveNameEN)&&isStatused)?1.0:burnMultiplier(categoryKO,isBurn,hasGuts);
-  const stab=stabMultiplier(moveTypeEN,atkTypesEN,stabModeKO);
-  const eff=typeMultiplier(moveTypeEN,defTypesEN);
-  const crit=critMultiplier(isCrit);
-  const wthr=weatherMultiplier(moveTypeEN,weatherKO);
-  const screen=screenMultiplier();
-  const mod=stab*eff*burn*crit*wthr*screen*moveMod;
-  const damages=ROLLS.map(r=>Math.floor(Math.floor(base*mod)*r));
-  return {damages,eff,crit:isCrit,weatherKO};
-}
-function koChances(dmg,hp){
-  dmg=dmg.slice().sort((a,b)=>a-b);
-  const min=dmg[0],max=dmg[dmg.length-1];
-  const oh=dmg.filter(d=>d>=hp).length/16;
-  let two=0;
-  for(const d1 of dmg){for(const d2 of dmg){if(d1+d2>=hp)two++;}}
-  two/=256;
-  return {range:[min,max],oneHit:oh,twoHit:two};
-}
-function effectText(mult){
-  if(mult===0)return "그러나 효과가 없는 것 같다……";
-  if(mult>=2)return "효과가 굉장했다!";
-  if(mult>1)return "효과는 좋은 편이다!";
-  if(mult===1)return "";
-  return "효과가 별로인 듯하다……";
-}
-function critText(isCrit){return isCrit?"급소에 맞았다!":"";}
-function hpText(cur,max){return `HP ${cur}/${max}`;}
-
-
-// ---- 엔트리 수집 ----
-function collectSide(p){
-  const nameKO=el(p+"Name").value || (p==="atk"?"공격측":"수비측");
-  const level=num(el(p+"Level").value||50);
-  const typesEN=[toENType(el(p+"Type1").value),toENType(el(p+"Type2").value)].filter(Boolean);
-  const curHP=num(el(p+"CurHP").value||1);
-  const maxHP=num(el(p+"HP").value||1);
-  const A=num(el(p+"A").value||1);
-  const B=num(el(p+"B").value||1);
-  const itemKO = el(p+"Item") ? el(p+"Item").value : "없음";
-  const itemEN = itemKoToEn(itemKO);
-  const status = el(p+"Status") ? el(p+"Status").value || "없음" : "없음";
-  return {nameKO,level,typesEN,stats:{curHP,maxHP,A,B},itemKO,itemEN,status};
-}
-
-function logLineKR(ctx){
-  const {atk,def,moveNameKO,range,eff,crit,weatherKO,atkStatus,atkItemEN,defStatus,defItemEN} = ctx;
-  const lines=[];
-  const subj = withParticle(atk.nameKO,"은","는");
-  const obj  = withParticle(moveNameKO,"을","를");
-  lines.push(`${subj} ${obj} 사용했다!`);
-
-  // 날씨 보정 안내
-  const moveTypeEN = ctx.moveTypeEN;
-  const wMult = weatherMultiplier(moveTypeEN,weatherKO);
-  if(weatherKO!=="없음" && wMult>1){
-    if(weatherKO==="쾌청" && moveTypeEN==="Fire"){
-      lines.push("쾌청한 날씨의 영향으로 불꽃 기술의 위력이 올라갔다!");
-    }else if(weatherKO==="비" && moveTypeEN==="Water"){
-      lines.push("비의 영향으로 물 타입 기술의 위력이 올라갔다!");
-    }else{
-      lines.push("날씨의 영향을 받아 위력이 올라갔다!");
-    }
-  }else if(weatherKO!=="없음" && wMult<1){
-    lines.push("날씨 탓인지 기술의 위력이 줄어든 것 같다.");
-  }
-
-  // 상태/특성 관련 안내
-  if(atkStatus==="화상" && ctx.categoryKO==="물리" && !ctx.hasGuts){
-    lines.push(`${withParticle(atk.nameKO,"은","는")} 화상으로 인해 공격력이 떨어져 있다.`);
-  }
-  if(atkStatus!=="없음" && /facade|객기/i.test(ctx.moveNameEN)){
-    lines.push("상태이상 덕분에 기술의 위력이 올라갔다!");
-  }
-
-  const e=effectText(eff);if(e)lines.push(e);
-  const c=critText(crit);if(c)lines.push(c);
-
-  const [minD,maxD]=range;
-  const minPct=Math.round(minD/def.stats.maxHP*100);
-  const maxPct=Math.round(maxD/def.stats.maxHP*100);
-  lines.push(`${def.nameKO}에게 ${minD} ~ ${maxD}의 데미지!  (${minPct}% ~ ${maxPct}%)`);
-
-  const remain=Math.max(0,def.stats.curHP-maxD);
-  const p=Math.round(remain/def.stats.maxHP*100);
-  lines.push(`남은 체력(최소): ${remain} / ${def.stats.maxHP} (${p}%)`);
-
-  return lines.join("\n");
-}
-
-
-function renderResult(ctx){
-  const msg=logLineKR(ctx);
-  el("outLog").textContent = msg;
-  const hist=el("hist");
-  hist.textContent = (hist.textContent?(hist.textContent+"\n"):"")+msg;
-}
-
-function updateTypeBadge(moveTypeEN){
-  const def=collectSide("def");
-  if(!moveTypeEN || def.typesEN.length===0){el("effNow").textContent="-";return;}
-  const eff=typeMultiplier(moveTypeEN,def.typesEN);
-  el("effNow").textContent = eff===0?"무효 ×0":(eff>=2?`상성 유리 ×${eff}`:(eff<1?`상성 불리 ×${eff}`:`보통 ×1`));
-}
-
-// ---- onPick 핸들러 ----
-async function onPickPokemon(side,koName){
-  try{
-    const {en,ko}=await resolvePokemonKO(koName);
-    const p=await fetchPokemon(en);
-    const types=p.types.map(t=>cap(t.type.name));
-    el(side+"Name").value=ko;
-    el(side+"Type1").value=TYPE_EN_TO_KO[types[0]]||types[0]||"";
-    el(side+"Type2").value=TYPE_EN_TO_KO[types[1]]||"";
-
-    const lvl=num(el(side+"Level").value||50);
-    const bs=cache.baseStats[en]||{hp:1,atk:1,def:1};
-    const hp=calcHP(
-      bs.hp,
-      31,
-      num(side==="def"?el("defHPEV").value:el("atkAEV").value),
-      lvl
-    );
-    el(side+"HP").value=hp;
-    if(!el(side+"CurHP").value)el(side+"CurHP").value=hp;
-    const A=calcOther(
-      bs.atk,
-      31,
-      num(side==="atk"?el("atkAEV").value:0),
-      lvl
-    );
-    const B=calcOther(
-      bs.def,
-      31,
-      num(side==="def"?el("defBEV").value:0),
-      lvl
-    );
-    el(side+"A").value=A;
-    el(side+"B").value=B;
-
-    // 특성 자동 채우기 (한국어 이름 우선)
-    const abilityENs = (p.abilities||[]).map(a=>a.ability.name);
-    const abilityNamesKO=[];
-    for(const abEn of abilityENs){
-      try{
-        let koName = cache.abilityKo[abEn];
-        if(!koName){
-          const ab = await fetchAbility(abEn);
-          koName = (ab.names||[]).find(n=>n.language?.name==="ko")?.name || abEn;
-          cache.abilityKo[abEn]=koName;
-          cache.abilityEn[koName]=abEn;
-        }
-        abilityNamesKO.push(koName);
-      }catch{
-        abilityNamesKO.push(abEn);
-      }
-    }
-    if(el(side+"Ability")) el(side+"Ability").value = abilityNamesKO.join(" / ");
-    persist();
-  }catch{}
-}
-
-async function onPickMove(koName){
-  try{
-    const {en,ko}=await resolveMoveKO(koName);
-    const m=await fetchMove(en);
-    el("moveName").value=ko;
-    const typeEN=cap(m.type.name);
-    el("moveType").value = TYPE_EN_TO_KO[typeEN]||typeEN;
-    el("moveCat").value = m.damage_class.name==="physical"?"물리":(m.damage_class.name==="special"?"특수":"물리");
-    el("movePower").value = m.power||0;
-    updateTypeBadge(typeEN);
-  }catch{}
-}
-
-// ---- 덱 저장/목록 ----
-
-function captureState(){
-  const ids=[
-    "atkSearch","atkLevel","atkName","atkType1","atkType2","atkCurHP","atkHP","atkA","atkB","atkS",
-    "atkAbility","atkItem","atkStatus","atkGuts","atkStab",
-    "defSearch","defLevel","defName","defType1","defType2","defCurHP","defHP","defA","defB","defS",
-    "defAbility","defItem","defStatus",
-    "weather",
-    "moveName","moveType","moveCat","movePower","isCrit","moveMod",
-    "slotName","deckList"
+function defaultMoves(){
+  return [
+    { name:"", type:"노말", cat:"physical", power:40 },
+    { name:"", type:"노말", cat:"physical", power:40 },
+    { name:"", type:"노말", cat:"special",  power:40 },
+    { name:"", type:"노말", cat:"status",   power:0  },
   ];
-  const o={};
-  ids.forEach(id=>{
-    const e=document.getElementById(id);
-    if(!e) return;
-    o[id]=e.value;
-  });
-  return o;
-}
-function restoreState(o){
-  Object.keys(o||{}).forEach(id=>{
-    if(el(id))el(id).value=o[id];
-  });
-  updateTypeBadge(toENType(el("moveType").value||""));
-}
-function refreshDeckList(){
-  const sel=el("deckList");
-  if(!sel)return;
-  const keys=Object.keys(localStorage).filter(k=>k.startsWith("deck-")).sort();
-  sel.innerHTML='<option value="">저장된 덱 목록</option>';
-  keys.forEach(k=>{
-    const opt=document.createElement("option");
-    opt.value=k;
-    opt.textContent=k.slice(5);
-    sel.appendChild(opt);
-  });
-}
-function saveDeck(){
-  const name=(el("slotName").value||"default").trim();
-  const key="deck-"+(name||"default");
-  localStorage.setItem(key,JSON.stringify(captureState()));
-  refreshDeckList();
-  alert("저장됨: "+name);
-}
-function loadDeckByKey(key){
-  const st=JSON.parse(localStorage.getItem(key)||"{}");
-  if(!Object.keys(st).length){alert("불러올 데이터 없음");return;}
-  restoreState(st);
-}
-function loadSelectedDeck(){
-  const sel=el("deckList").value;
-  if(!sel){alert("덱을 선택하세요.");return;}
-  loadDeckByKey(sel);
-}
-function loadDeckToSide(side){
-  const key=el("deckList").value;
-  if(!key){alert("덱을 선택하세요.");return;}
-  const st=JSON.parse(localStorage.getItem(key)||"{}");
-  const prefix=side==="atk"?"atk":"def";
-  Object.entries(st).forEach(([id,val])=>{
-    if(id.startsWith(prefix) && el(id)) el(id).value=val;
-  });
-}
-function deleteDeck(){
-  const key=el("deckList").value;
-  if(!key){alert("삭제할 덱을 선택하세요.");return;}
-  const name=key.slice(5);
-  if(!confirm(`덱 '${name}'을(를) 삭제할까요?`))return;
-  localStorage.removeItem(key);
-  refreshDeckList();
 }
 
-// ---- 메인 계산 ----
-let lastRoll=null;
-function computeCore(){
-  const atk=collectSide("atk");
-  const def=collectSide("def");
-  const moveNameKO=el("moveName").value||"기술";
-  const moveTypeEN=toENType(el("moveType").value||"Normal");
-  const power=num(el("movePower").value||1);
-  const categoryKO=el("moveCat").value||"물리";
-  const isCrit=el("isCrit").value==="예";
-  const stabModeKO=el("atkStab").value||"자동";
-  const atkStatus=atk.status;
-  const defStatus=def.status;
-  const hasGuts=el("atkGuts").value==="예";
-  const weatherKO=el("weather").value||"없음";
-  const moveModInput=num(el("moveMod").value||1.0);
+function ensureMoves(p){
+  if(!Array.isArray(p.moves)) p.moves = [];
+  for(let i=0;i<4;i++){
+    if(!p.moves[i]) p.moves[i] = { name:"", type:"노말", cat:"physical", power:40 };
+    p.moves[i].name  = String(p.moves[i].name ?? "");
+    p.moves[i].type  = p.moves[i].type || "노말";
+    p.moves[i].cat   = p.moves[i].cat || "physical";
+    p.moves[i].power = Number.isFinite(+p.moves[i].power) ? +p.moves[i].power : 40;
+  }
+}
 
-  // 기본 공격/방어값
-  let attack=(categoryKO==="물리")?atk.stats.A:atk.stats.A;
-  let defense=(categoryKO==="물리")?def.stats.B:def.stats.B;
+function makeDefaultState(){
+  const trainers = DEFAULT_ROSTER.map(t => ({
+    id: cryptoRandomId(),
+    name: t.name,
+    team: t.team.map(p => ({
+      origName: p.origName,
+      nickName: p.nickName,
+      input: {
+        type1: "노말",
+        type2: "",
+        baseHp: 100,
+        baseAtk: 100,
+        baseDef: 100,
+        baseSpA: 100,
+        baseSpD: 100,
+        baseSpe: 100,
+        level: 50
+      },
+      moves: defaultMoves()
+    }))
+  }));
+  return { version: 5, trainers };
+}
 
-  // 공격측 아이템 보정
-  const atkItemEN = atk.itemEN;
-  if(atkItemEN==="life-orb"){
-    // 생명의구슬: 위력 1.3배, 반동은 피해 적용 시 처리
-    attack=Math.floor(attack*1.3);
-  }
-  if(atkItemEN==="choice-band" && categoryKO==="물리"){
-    attack=Math.floor(attack*1.5);
-  }
-  if(atkItemEN==="choice-specs" && categoryKO==="특수"){
-    attack=Math.floor(attack*1.5);
-  }
-  // 수비측 아이템 보정
-  const defItemEN = def.itemEN;
-  if(defItemEN==="assault-vest" && categoryKO==="특수"){
-    defense=Math.floor(defense*1.5);
-  }
-  if(defItemEN==="eviolite"){
-    defense=Math.floor(defense*1.5);
-  }
+function migratePokemon(p, fallbackOrig){
+  if (!("origName" in p)) p.origName = normName(p.name, fallbackOrig);
+  if (!("nickName" in p)) p.nickName = normName(p.name, p.origName);
 
-  const moveNameEN = el("moveName").value;
-  const isBurn = atkStatus==="화상";
-  const isStatused = ["독","맹독","화상","마비"].includes(atkStatus);
-  const moveMod = moveModInput;
+  p.input ??= {};
+  p.input.type1 ??= "노말";
+  p.input.type2 ??= "";
+  p.input.level ??= 50;
 
-  const {damages,eff,crit,weatherKO:weatherOut}=computeDamage({
-    level:atk.level,
-    power,
-    attack,
-    defense,
-    categoryKO,
-    moveTypeEN,
-    atkTypesEN:atk.typesEN,
-    defTypesEN:def.typesEN,
-    opts:{
-      isCrit,
-      stabModeKO,
-      isBurn,
-      hasGuts,
-      weatherKO,
-      isStatused,
-      moveNameEN,
-      moveMod
-    }
+  ["baseHp","baseAtk","baseDef","baseSpA","baseSpD","baseSpe"].forEach(k=>{
+    p.input[k] = baseOr100(p.input[k]);
   });
-  const {range,oneHit,twoHit}=koChances(damages,def.stats.curHP);
+
+  ensureMoves(p);
+}
+
+function loadState(){
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if(!raw) return makeDefaultState();
+  try{
+    const st = JSON.parse(raw);
+    if(!st || !st.trainers) return makeDefaultState();
+
+    st.trainers.forEach((tr, trIdx)=>{
+      tr.id ??= cryptoRandomId();
+      tr.name ??= `트레이너${trIdx+1}`;
+      tr.team ??= [];
+
+      while (tr.team.length < 6){
+        const i = tr.team.length + 1;
+        tr.team.push({
+          origName:`포켓몬${i}`,
+          nickName:`포켓몬${i}`,
+          input:{ type1:"노말", type2:"", baseHp:100, baseAtk:100, baseDef:100, baseSpA:100, baseSpD:100, baseSpe:100, level:50 },
+          moves: defaultMoves()
+        });
+      }
+      if (tr.team.length > 6) tr.team = tr.team.slice(0,6);
+
+      tr.team.forEach((p, i)=>{
+        migratePokemon(p, `포켓몬${i+1}`);
+      });
+    });
+
+    return st;
+  }catch{
+    return makeDefaultState();
+  }
+}
+function saveState(state){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+// ===== 능력치(IV31/EV0/중립) =====
+function calcHP(base, level){
+  const B = clampInt(base, 1, 255);
+  const L = clampInt(level, 1, 100);
+  const IV = 31, EV = 0;
+  return Math.floor(((2*B + IV + Math.floor(EV/4)) * L) / 100) + L + 10;
+}
+function calcOther(base, level){
+  const B = clampInt(base, 1, 255);
+  const L = clampInt(level, 1, 100);
+  const IV = 31, EV = 0;
+  const nature = 1.0;
+  return Math.floor((Math.floor(((2*B + IV + Math.floor(EV/4)) * L) / 100) + 5) * nature);
+}
+function derivedStats(p){
+  const i = p.input;
+  const L = clampInt(i.level,1,100);
   return {
-    atk,def,moveNameKO,
-    range,oneHit,twoHit,eff,crit,damages,
-    weatherKO,
-    atkStatus,
-    defStatus,
-    atkItemEN,
-    defItemEN,
-    moveTypeEN,
-    moveNameEN,
-    categoryKO,
-    hasGuts
+    level: L,
+    type1: (i.type1||"").trim() || "노말",
+    type2: (i.type2||"").trim(),
+    hp: calcHP(baseOr100(i.baseHp), L),
+    atk: calcOther(baseOr100(i.baseAtk), L),
+    def: calcOther(baseOr100(i.baseDef), L),
+    spa: calcOther(baseOr100(i.baseSpA), L),
+    spd: calcOther(baseOr100(i.baseSpD), L),
+    spe: calcOther(baseOr100(i.baseSpe), L),
+  };
+}
+function isFilledPokemon(p){
+  const i = p.input;
+  return String(i.type1 ?? "").trim() !== "" && String(i.level ?? "").trim() !== "";
+}
+
+// ===================== 배틀 런타임 =====================
+
+function makeSideCond(){
+  return {
+    A:{ reflect:false, lightscreen:false, auroraveil:false, protect:false },
+    B:{ reflect:false, lightscreen:false, auroraveil:false, protect:false },
   };
 }
 
-// ---- 턴 처리 보조 ----
-function processItemHeal(side, sideInfo){
-  const name=sideInfo?.nameKO || el(side+"Name").value || (side==="atk"?"공격측":"수비측");
-  let cur=num(el(side+"CurHP").value||0);
-  const max=num(el(side+"HP").value||1);
-  const itemKO=sideInfo?.itemKO || (el(side+"Item")?.value || "없음");
-  const itemEN=itemKoToEn(itemKO);
-  const logs=[];
-  if(cur<=0) return {cur,logs};
+function makeBattleRuntime(){
+  return {
+    started:false,
+    startedOnceLogged:false,
+    turn:1,
+    viewSwapped:false,
+    actedInTurn:0,
+    leftBase:"A",
+    rightBase:"B",
 
-  if(itemEN==="leftovers" && cur<max){
-    const heal=Math.floor(max/16);
-    if(heal>0){
-      cur=Math.min(max,cur+heal);
-      logs.push(`${withParticle(name,"은","는")} 먹다 남은 음식의 효과로 HP가 조금 회복되었다!`);
-    }
-  }
-  if(itemEN==="sitrus-berry" && !itemUsed[side] && cur<=Math.floor(max/2)){
-    const heal=Math.floor(max/4);
-    cur=Math.min(max,cur+heal);
-    itemUsed[side]=true;
-    logs.push(`${withParticle(name,"은","는")} 시트러스열매를 먹고 HP가 회복되었다!`);
-  }
-  if(itemEN==="black-sludge"){
-    const isPoison = (sideInfo?.typesEN||[]).some(t=>t==="Poison");
-    if(isPoison){
-      const heal=Math.floor(max/16);
-      cur=Math.min(max,cur+heal);
-      logs.push(`${withParticle(name,"은","는")} 검은 진흙의 효과로 HP가 조금 회복되었다!`);
-    }else{
-      const dmg=Math.floor(max/8);
-      cur=Math.max(0,cur-dmg);
-      logs.push(`${withParticle(name,"은","는")} 검은 진흙의 독으로 ${dmg}의 데미지를 입었다!`);
-    }
-  }
+    aTrainerId:null,
+    bTrainerId:null,
+    aActive:0,
+    bActive:0,
 
-  el(side+"CurHP").value=cur;
-  return {cur,logs};
+    aHp:[0,0,0,0,0,0],
+    bHp:[0,0,0,0,0,0],
+    aStatus:Array.from({length:6},()=>makeStatusState()),
+    bStatus:Array.from({length:6},()=>makeStatusState()),
+
+    weather:{ kind:"none", turns:0 },
+    sideCond: makeSideCond(),
+    log:[],
+    history:[]
+  };
 }
 
-// ---- 초기화 ----
-function setup(){
-  preloadKOLists();
-  attachSuggest("atkSearch",()=>cache.koPokeList, v=>onPickPokemon("atk",v));
-  attachSuggest("defSearch",()=>cache.koPokeList, v=>onPickPokemon("def",v));
-  attachSuggest("moveName",()=>cache.koMoveList, v=>onPickMove(v));
+// ===== 전역 =====
+let state = loadState();
+let ui = {
+  tab:"data",
+  tabHistory: [],
+  selectedTrainerId: state.trainers[0]?.id ?? null,
+  selectedPokemonIndex: 0,
+  battle: makeBattleRuntime()
+};
 
-  el("btnSwap").addEventListener("click",()=>{
-    const ids=["Name","Level","Type1","Type2","CurHP","HP","A","B","Ability","AEV","BEV","Item","Status"];
-    for(const id of ids){
-      const a=el("atk"+id), d=el("def"+id);
-      const t=a.value; a.value=d.value; d.value=t;
-    }
-    const tmpStage=toxicStage.atk;
-    toxicStage.atk=toxicStage.def;
-    toxicStage.def=tmpStage;
-    itemUsed.atk=false; itemUsed.def=false;
-    updateTypeBadge(toENType(el("moveType").value||""));
-  });
+function battle(){ return ui.battle; }
+function getSideCond(k){ return battle().sideCond[k]; }
 
-  el("swapAtk").addEventListener("click",()=>{
-    const hist=el("hist");
-    hist.textContent=(hist.textContent?(hist.textContent+"\n"):"")+`${withParticle(el("atkName").value||"공격측","은","는")} 포켓몬을 교체했다.`;
-    toxicStage.atk=0;
-  });
-  el("swapDef").addEventListener("click",()=>{
-    const hist=el("hist");
-    hist.textContent=(hist.textContent?(hist.textContent+"\n"):"")+`${withParticle(el("defName").value||"수비측","은","는")} 포켓몬을 교체했다.`;
-    toxicStage.def=0;
-  });
+// 공용
+function getTrainerById(id){
+  return state.trainers.find(t=>t.id===id) || state.trainers[0];
+}
+function trainerOptions(){
+  return state.trainers.map(t=>`<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+}
+function pokemonOptions(team){
+  return team.map((p,i)=>`<option value="${i}">${i+1}. ${escapeHtml(pokeNick(p))}</option>`).join("");
+}
 
-  el("btnSave").addEventListener("click",saveDeck);
-  el("btnLoadSel").addEventListener("click",loadSelectedDeck);
-  el("btnLoadAtk").addEventListener("click",()=>loadDeckToSide("atk"));
-  el("btnLoadDef").addEventListener("click",()=>loadDeckToSide("def"));
-  el("btnDelDeck").addEventListener("click",deleteDeck);
+// ===================== 탭/뒤로가기 =====================
 
-  el("btnCalc").addEventListener("click",()=>{
-    const ctx=computeCore();
-    renderResult(ctx);
-    updateTypeBadge(ctx.moveTypeEN);
-  });
+function setTab(tab){
+  if(ui.tab !== tab){
+    ui.tabHistory.push(ui.tab);
+    if(ui.tabHistory.length > 20) ui.tabHistory.shift();
+  }
+  ui.tab = tab;
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===tab));
+  $("tab-data").classList.toggle("hidden", tab!=="data");
+  $("tab-battle").classList.toggle("hidden", tab!=="battle");
+}
+document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click", ()=>setTab(b.dataset.tab)));
 
-  el("btnRoll").addEventListener("click",()=>{
-    const ctx=computeCore();
-    const dmg=ctx.damages[Math.floor(Math.random()*16)];
-    lastRoll=dmg;
-    const defCur=num(el("defCurHP").value||ctx.def.stats.curHP);
-    const remain=Math.max(0,defCur-dmg);
-    const subj=withParticle(ctx.atk.nameKO,"은","는");
-    const obj=withParticle(ctx.moveNameKO,"을","를");
-    const lines=[
-      `${subj} ${obj} 사용했다!`,
-      `${ctx.def.nameKO}에게 ${dmg}의 데미지! [HP ${defCur}/${ctx.def.stats.maxHP} → ${remain}/${ctx.def.stats.maxHP}]`
-    ];
-    const effLine=effectText(ctx.eff); if(effLine)lines.push(effLine);
-    const critLine=critText(ctx.crit); if(critLine)lines.push(critLine);
-    const text=lines.join("\n");
-    el("outLog").textContent=text;
-    const hist=el("hist");
-    hist.textContent=(hist.textContent?(hist.textContent+"\n"):"")+text;
-  });
+$("btn-back").onclick = ()=>{
+  const prev = ui.tabHistory.pop();
+  if(!prev) return toast("뒤로갈 화면이 없습니다.");
+  ui.tab = prev;
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===prev));
+  $("tab-data").classList.toggle("hidden", prev!=="data");
+  $("tab-battle").classList.toggle("hidden", prev!=="battle");
+};
 
-  el("btnApply").addEventListener("click",()=>{
-    if(lastRoll==null){alert("먼저 '랜덤 롤 1회'를 실행하세요.");return;}
-    const defCur=num(el("defCurHP").value||0);
-    const defMax=num(el("defHP").value||1);
-    const defName=el("defName").value||"수비측";
-    const defItemEN=itemKoToEn(el("defItem").value||"");
-    let newHP;
+// ===================== Undo =====================
 
-    // 기합의띠 처리: 풀피에서 맞으면 1HP로 버팀
-    if(defItemEN==="focus-sash" && defCur===defMax && lastRoll>=defCur){
-      newHP=1;
-      const line=`${withParticle(defName,"은","는")} 기합의띠의 힘으로 간신히 버텼다!`;
-      const hist=el("hist");
-      hist.textContent=(hist.textContent?(hist.textContent+"\n"):"")+line;
-    }else{
-      newHP=Math.max(0,defCur-lastRoll);
-    }
+function pushUndo(label){
+  ui.battle.history.push({ label, snapshot: deepClone(ui.battle) });
+}
+function undo(){
+  const last = ui.battle.history.pop();
+  if(!last) return toast("되돌릴 기록이 없습니다.");
+  ui.battle = last.snapshot;
+  toast(`되돌림: ${last.label}`);
+  renderBattleAll();
+}
+$("btn-undo").onclick = undo;
 
-    el("defCurHP").value=newHP;
+// ===================== 로그 =====================
 
-    // 생명의구슬 반동 (공격측)
-    const atkItemEN=itemKoToEn(el("atkItem").value||"");
-    if(atkItemEN==="life-orb"){
-      const atkName=el("atkName").value||"공격측";
-      const atkCur=num(el("atkCurHP").value||0);
-      const atkMax=num(el("atkHP").value||1);
-      const recoil=Math.max(1,Math.floor(atkMax/10));
-      const after=Math.max(0,atkCur-recoil);
-      el("atkCurHP").value=after;
-      const hist=el("hist");
-      const line=`${withParticle(atkName,"은","는")} 생명의구슬의 반동으로 ${recoil}의 데미지를 입었다!`;
-      hist.textContent=(hist.textContent?(hist.textContent+"\n"):"")+line;
-      if(atkCur>0 && after===0){
-        const faint=`${withParticle(atkName,"은","는")} 쓰러졌다!`;
-        hist.textContent+="\n"+faint;
+function logAdd(line){
+  ui.battle.log.push(line);
+  renderLog();
+}
+function renderLog(){
+  const el = $("battle-log");
+  if(!el) return;
+  el.innerHTML = ui.battle.log.map((l, idx)=>`
+    <div class="logline">
+      <div class="logrow">
+        <div class="logtext">${escapeHtml(l)}</div>
+        <button class="iconbtn" title="복사" aria-label="복사" data-idx="${idx}">📋</button>
+      </div>
+    </div>
+  `).join("");
+
+  el.querySelectorAll(".iconbtn").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const i = Number(btn.dataset.idx);
+      const text = ui.battle.log[i] ?? "";
+      try{
+        await navigator.clipboard.writeText(text);
+        toast("복사됨");
+      }catch{
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        toast("복사됨");
       }
-    }
-
-    // 쓰러짐 판정
-    if(defCur>0 && newHP===0){
-      const hist=el("hist");
-      const line=`${withParticle(defName,"은","는")} 쓰러졌다!`;
-      hist.textContent=(hist.textContent?(hist.textContent+"\n"):"")+line;
-    }
-
-    lastRoll=null;
-  });
-
-  el("btnClear").addEventListener("click",()=>{el("hist").textContent="";});
-
-  // 턴 종료 처리: 상태이상/날씨/아이템 회복/피해
-  el("btnTurn").addEventListener("click",()=>{
-    const atkSide=collectSide("atk");
-    const defSide=collectSide("def");
-    const weather=el("weather").value||"없음";
-
-    const prevAtk=num(el("atkCurHP").value||0);
-    const prevDef=num(el("defCurHP").value||0);
-    const logs=[];
-
-    // 상태이상 데미지 (양측)
-    ["atk","def"].forEach(side=>{
-      const info = side==="atk"?atkSide:defSide;
-      let cur=num(el(side+"CurHP").value||0);
-      const max=num(el(side+"HP").value||1);
-      const st=info.status||"없음";
-      if(cur>0){
-        if(st==="독"){
-          const d=Math.floor(max/8);
-          cur=Math.max(0,cur-d);
-          logs.push(`${withParticle(info.nameKO,"은","는")} 독의 데미지를 입었다!`);
-        }
-        if(st==="화상"){
-          const d=Math.floor(max/16);
-          cur=Math.max(0,cur-d);
-          logs.push(`${withParticle(info.nameKO,"은","는")} 화상의 데미지를 입었다!`);
-        }
-        if(st==="맹독"){
-          const key = side==="atk"?"atk":"def";
-          if(toxicStage[key]<=0) toxicStage[key]=1;
-          const d=Math.floor(max*Math.max(1,toxicStage[key])/16);
-          cur=Math.max(0,cur-d);
-          logs.push(`${withParticle(info.nameKO,"은","는")} 맹독의 데미지를 입었다!`);
-          toxicStage[key]=Math.min(toxicStage[key]+1,15);
-        }
-      }
-      el(side+"CurHP").value=cur;
     });
+  });
 
-    // 날씨 잔류 데미지
-    if(weather==="모래바람"){
-      [ ["atk",atkSide],["def",defSide] ].forEach(([side,info])=>{
-        let cur=num(el(side+"CurHP").value||0);
-        const maxHP=num(el(side+"HP").value||1);
-        if(cur<=0)return;
-        const safeTypes=["Rock","Ground","Steel"];
-        const immune = (info.typesEN||[]).some(t=>safeTypes.includes(t));
-        if(!immune){
-          const d=Math.floor(maxHP/16);
-          cur=Math.max(0,cur-d);
-          el(side+"CurHP").value=cur;
-          logs.push(`${withParticle(info.nameKO,"은","는")} 모래바람으로 ${d}의 데미지를 입었다!`);
-        }
-      });
-    }
-    if(weather==="싸라기눈"){
-      [ ["atk",atkSide],["def",defSide] ].forEach(([side,info])=>{
-        let cur=num(el(side+"CurHP").value||0);
-        const maxHP=num(el(side+"HP").value||1);
-        if(cur<=0)return;
-        const immune = (info.typesEN||[]).includes("Ice");
-        if(!immune){
-          const d=Math.floor(maxHP/16);
-          cur=Math.max(0,cur-d);
-          el(side+"CurHP").value=cur;
-          logs.push(`${withParticle(info.nameKO,"은","는")} 싸라기눈으로 ${d}의 데미지를 입었다!`);
-        }
-      });
-    }
+  el.scrollTop = el.scrollHeight;
+}
 
-    // 아이템 회복/데미지
-    const atkHeal=processItemHeal("atk",atkSide);
-    const defHeal=processItemHeal("def",defSide);
-    logs.push(...atkHeal.logs,...defHeal.logs);
+// ===================== UI 헬퍼 =====================
 
-    const atkNow=num(el("atkCurHP").value||0);
-    const defNow=num(el("defCurHP").value||0);
-    const atkName=el("atkName").value||"공격측";
-    const defName=el("defName").value||"수비측";
-    if(prevAtk>0 && atkNow===0){
-      logs.push(`${withParticle(atkName,"은","는")} 쓰러졌다!`);
-    }
-    if(prevDef>0 && defNow===0){
-      logs.push(`${withParticle(defName,"은","는")} 쓰러졌다!`);
-    }
+function fillTypeSelect(sel){
+  sel.innerHTML = TYPES.map(t => `<option value="${t}">${t}</option>`).join("");
+}
+function fillWeatherSelect(){
+  $("weather-kind").innerHTML = WEATHER.map(w=>`<option value="${w.key}">${w.label}</option>`).join("");
+}
+function fillStatusSelect(){
+  $("status-kind").innerHTML = STATUS.map(s=>`<option value="${s.key}">${s.label}</option>`).join("");
+}
+function syncSleepUI(){
+  $("sleep-row").style.display = ($("status-kind").value==="slp") ? "" : "none";
+}
+if ($("status-kind")) $("status-kind").addEventListener("change", syncSleepUI);
 
-    const hist=el("hist");
-    const baseLine=`턴 종료 처리 → [공격 HP ${atkNow}/${el("atkHP").value||1}, 수비 HP ${defNow}/${el("defHP").value||1}]`;
-    const text=[baseLine,...logs].join("\n");
-    hist.textContent=(hist.textContent?(hist.textContent+"\n"):"")+text;
+// 텍스트/배치 수정 (HTML 건드리지 않고 교정)
+function polishStaticTexts(){
+  const titleEl = document.querySelector(".h1");
+  if(titleEl) titleEl.textContent = "포켓몬 배틀 간이 계산기";
+
+  const subEl = document.querySelector(".sub");
+  if(subEl) subEl.textContent = "";
+
+  // 트레이너/포켓몬 이름 안내 제거
+  Array.from(document.querySelectorAll(".hint")).forEach(h=>{
+    if(h.textContent.includes("트레이너/포켓몬 이름은 화면에서 수정 후 저장됩니다")){
+      h.textContent = "";
+    }
+  });
+
+  // 결과값/뒤로가기(취소)
+  const logTitle = Array.from(document.querySelectorAll(".box-title")).find(el=>el.textContent.includes("한국어 로그"));
+  if(logTitle) logTitle.textContent = "결과값";
+  if($("btn-undo")) $("btn-undo").textContent = "뒤로가기(취소)";
+
+  // 결과값 설명 제거
+  const logHint = $("battle-log")?.previousElementSibling;
+  if(logHint && logHint.classList.contains("hint")) logHint.textContent = "";
+
+  // 환경/상태/지속 상단 설명 제거
+  Array.from(document.querySelectorAll(".box-title")).forEach(bt=>{
+    if(bt.textContent.includes("환경 / 상태 / 지속")){
+      const h = bt.parentElement.querySelector(".hint");
+      if(h) h.textContent = "";
+    }
+  });
+
+  // 현재 상태 설명 제거
+  Array.from(document.querySelectorAll(".mini-title")).forEach(t=>{
+    if(t.textContent.trim() === "현재 상태"){
+      const h = t.nextElementSibling;
+      if(h && h.classList.contains("hint")) h.textContent = "";
+    }
+  });
+
+  // 우측 액션 카드 설명 제거
+  const rightHint = document.querySelector("#right-move-title + .hint");
+  if(rightHint) rightHint.textContent = "";
+
+  // 배틀 세팅 설명 문구 교체
+  Array.from(document.querySelectorAll(".box-title")).forEach(bt=>{
+    if(bt.textContent.trim() === "배틀 세팅"){
+      const h = bt.parentElement.querySelector(".hint");
+      if(h) h.textContent = "선공/후공 트레이너 선택 후 '행동 실행' 버튼을 클릭해주세요.";
+    }
+  });
+
+  // 선공/후공 타이틀 괄호 제거
+  const leftSetupTitle = document.querySelector(".battle-top .side-left .mini-title");
+  if(leftSetupTitle) leftSetupTitle.textContent = "선공";
+  const rightSetupTitle = document.querySelector(".battle-top .side-right .mini-title");
+  if(rightSetupTitle) rightSetupTitle.textContent = "후공";
+
+  // '트너' 라벨 제거
+  Array.from(document.querySelectorAll(".battle-top .rowlabel")).forEach(lb=>{
+    if(lb.textContent.includes("트너")) lb.textContent = "";
+  });
+
+  // 표시: 선공=좌/우 pill 숨기기
+  const pillSwap = $("pill-swap");
+  if(pillSwap) pillSwap.style.display = "none";
+
+  // 공격측/수비측 카드 폭 반반 맞추기
+  document.querySelectorAll(".grid3").forEach(g=>{
+    g.style.gridTemplateColumns = "1fr 1fr 1.1fr";
   });
 }
 
-window.addEventListener("DOMContentLoaded",setup);
+// 상태 요약 pill 추가
+function ensureStatusSummaryPill(){
+  const head = document.querySelector(".battle-head");
+  if(!head) return;
+  if(!$("battle-status-summary")){
+    const div = document.createElement("div");
+    div.className = "pill";
+    div.id = "battle-status-summary";
+    div.textContent = "상태: -";
+    head.appendChild(div);
+  }
+}
+
+// ===================== 데이터 탭 UI =====================
+
+function renderTrainerSelect(){
+  $("trainer-select").innerHTML = trainerOptions();
+  $("trainer-select").value = ui.selectedTrainerId;
+  const t = getTrainerById(ui.selectedTrainerId);
+  $("trainer-name").value = t?.name ?? "";
+}
+if ($("trainer-select")){
+  $("trainer-select").addEventListener("change", e=>{
+    ui.selectedTrainerId = e.target.value;
+    ui.selectedPokemonIndex = 0;
+    renderTrainerSelect();
+    renderTeamList();
+    renderPokemonEditor();
+  });
+}
+
+if($("btn-save-trainer-name")){
+  $("btn-save-trainer-name").onclick = ()=>{
+    const t = getTrainerById(ui.selectedTrainerId);
+    const v = $("trainer-name").value.trim();
+    if(!v) return toast("트레이너 이름이 비어있습니다.");
+    t.name = v;
+    saveState(state);
+    renderTrainerSelect();
+    renderBattleSelectors();
+    renderBattleAll();
+    toast("저장됨");
+  };
+}
+
+function renderTeamList(){
+  const t = getTrainerById(ui.selectedTrainerId);
+  const html = t.team.map((p, idx) => {
+    const d = derivedStats(p);
+    const types = [d.type1, d.type2].filter(Boolean).join("/") || "(미입력)";
+    const meta = `포켓몬: ${pokeOrig(p)} · ${types} · Lv${d.level}`;
+    return `
+      <div class="team-item ${idx===ui.selectedPokemonIndex?'active':''}" data-idx="${idx}">
+        <div class="team-name">${idx+1}. ${escapeHtml(pokeNick(p))}</div>
+        <div class="team-meta">${escapeHtml(meta)}</div>
+      </div>
+    `;
+  }).join("");
+  $("team-list").innerHTML = html;
+  document.querySelectorAll(".team-item").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      ui.selectedPokemonIndex = Number(el.dataset.idx);
+      renderTeamList();
+      renderPokemonEditor();
+    });
+  });
+}
+
+function renderPokemonEditor(){
+  const t = getTrainerById(ui.selectedTrainerId);
+  const p = t.team[ui.selectedPokemonIndex];
+  if(!p) { $("poke-editor").innerHTML = `<div class="hint">선택 엔트리 없음</div>`; return; }
+
+  migratePokemon(p, `포켓몬${ui.selectedPokemonIndex+1}`);
+  ensureMoves(p);
+
+  const i = p.input;
+  const type1Options = TYPES.map(tp => `<option value="${tp}" ${tp===(i.type1||"노말")?'selected':''}>${tp}</option>`).join("");
+  const type2Options = `<option value="" ${i.type2?``:`selected`}>(없음)</option>` +
+    TYPES.map(tp => `<option value="${tp}" ${tp===(i.type2||"")?'selected':''}>${tp}</option>`).join("");
+
+  const movesHtml = p.moves.map((m, idx)=>{
+    const tOps = TYPES.map(tp=>`<option value="${tp}" ${tp===m.type?'selected':''}>${tp}</option>`).join("");
+    return `
+      <div class="mini">
+        <div class="mini-title">기술 ${idx+1}</div>
+        <div class="row"><label class="rowlabel">이름</label><input id="ed-move-name-${idx}" value="${escapeHtml(m.name)}" placeholder="기술 이름"></div>
+        <div class="row"><label class="rowlabel">타입</label><select id="ed-move-type-${idx}">${tOps}</select></div>
+        <div class="row">
+          <label class="rowlabel">분류</label>
+          <select id="ed-move-cat-${idx}">
+            <option value="physical" ${m.cat==="physical"?"selected":""}>물리</option>
+            <option value="special"  ${m.cat==="special" ?"selected":""}>특수</option>
+            <option value="status"   ${m.cat==="status"  ?"selected":""}>변화</option>
+          </select>
+        </div>
+        <div class="row"><label class="rowlabel">위력</label><input id="ed-move-power-${idx}" type="number" min="0" max="999" value="${escapeHtml(String(m.power))}"></div>
+      </div>
+    `;
+  }).join("");
+
+  $("poke-editor").innerHTML = `
+    <div class="grid2">
+      <div class="mini">
+        <div class="mini-title">포켓몬 정보</div>
+        <div class="row"><label class="rowlabel">포켓몬</label><input id="ed-orig" value="${escapeHtml(pokeOrig(p))}" placeholder="예: 피카츄"></div>
+        <div class="row"><label class="rowlabel">이름</label><input id="ed-nick" value="${escapeHtml(pokeNick(p))}" placeholder="내가 지은 이름"></div>
+        <div class="row"><label class="rowlabel">타입1</label><select id="ed-type1">${type1Options}</select></div>
+        <div class="row"><label class="rowlabel">타입2</label><select id="ed-type2">${type2Options}</select></div>
+        <div class="row"><label class="rowlabel">레벨</label><input id="ed-level" type="number" min="1" max="100" value="${escapeHtml(i.level??50)}"></div>
+      </div>
+
+      <div class="mini">
+        <div class="mini-title">종족값(6)</div>
+        <div class="row"><label class="rowlabel">HP</label><input id="ed-bhp" type="number" min="1" max="255" value="${baseOr100(i.baseHp)}"></div>
+        <div class="row"><label class="rowlabel">공격</label><input id="ed-batk" type="number" min="1" max="255" value="${baseOr100(i.baseAtk)}"></div>
+        <div class="row"><label class="rowlabel">방어</label><input id="ed-bdef" type="number" min="1" max="255" value="${baseOr100(i.baseDef)}"></div>
+        <div class="row"><label class="rowlabel">특공</label><input id="ed-bspa" type="number" min="1" max="255" value="${baseOr100(i.baseSpA)}"></div>
+        <div class="row"><label class="rowlabel">특방</label><input id="ed-bspd" type="number" min="1" max="255" value="${baseOr100(i.baseSpD)}"></div>
+        <div class="row"><label class="rowlabel">스피드</label><input id="ed-bspe" type="number" min="1" max="255" value="${baseOr100(i.baseSpe)}"></div>
+        <div class="hint">빈칸은 자동으로 100 처리됩니다.</div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:8px;">
+      ${movesHtml}
+    </div>
+
+    <div class="mini" style="margin-top:8px;">
+      <div class="mini-title">자동 계산(IV31/EV0/중립)</div>
+      <div id="ed-derived" class="hint"></div>
+    </div>
+  `;
+
+  const preview = ()=>{
+    const tmp = {
+      origName: $("ed-orig").value,
+      nickName: $("ed-nick").value,
+      input:{
+        type1: $("ed-type1").value,
+        type2: $("ed-type2").value,
+        level: $("ed-level").value,
+        baseHp: $("ed-bhp").value,
+        baseAtk: $("ed-batk").value,
+        baseDef: $("ed-bdef").value,
+        baseSpA: $("ed-bspa").value,
+        baseSpD: $("ed-bspd").value,
+        baseSpe: $("ed-bspe").value,
+      }
+    };
+    migratePokemon(tmp, `포켓몬${ui.selectedPokemonIndex+1}`);
+    const d = derivedStats(tmp);
+    $("ed-derived").textContent =
+      `포켓몬 ${pokeOrig(tmp)} / 이름 ${pokeNick(tmp)} · ` +
+      `타입 ${[d.type1,d.type2].filter(Boolean).join("/")||"(미입력)"} · Lv${d.level} · ` +
+      `HP${d.hp} 공격${d.atk} 방어${d.def} 특공${d.spa} 특방${d.spd} 스피드${d.spe}`;
+  };
+
+  [
+    "ed-orig","ed-nick","ed-type1","ed-type2","ed-level",
+    "ed-bhp","ed-batk","ed-bdef","ed-bspa","ed-bspd","ed-bspe"
+  ].forEach(id=>{
+    const el = $(id);
+    if(el){
+      el.addEventListener("input", preview);
+      el.addEventListener("change", preview);
+    }
+  });
+
+  preview();
+
+  if($("btn-save-poke")){
+    $("btn-save-poke").onclick = ()=>{
+      const orig = $("ed-orig").value.trim();
+      const nick = $("ed-nick").value.trim();
+      if(!orig) return toast("포켓몬 이름(종)이 비어있습니다.");
+      if(!nick) return toast("이름이 비어있습니다.");
+
+      p.origName = orig;
+      p.nickName = nick;
+
+      p.input.type1 = $("ed-type1").value;
+      p.input.type2 = $("ed-type2").value || "";
+      p.input.level = clampInt($("ed-level").value,1,100);
+
+      p.input.baseHp  = baseOr100($("ed-bhp").value);
+      p.input.baseAtk = baseOr100($("ed-batk").value);
+      p.input.baseDef = baseOr100($("ed-bdef").value);
+      p.input.baseSpA = baseOr100($("ed-bspa").value);
+      p.input.baseSpD = baseOr100($("ed-bspd").value);
+      p.input.baseSpe = baseOr100($("ed-bspe").value);
+
+      ensureMoves(p);
+      p.moves.forEach((m, idx)=>{
+        m.name  = $(`ed-move-name-${idx}`).value.trim();
+        m.type  = $(`ed-move-type-${idx}`).value;
+        m.cat   = $(`ed-move-cat-${idx}`).value;
+        m.power = clampInt($(`ed-move-power-${idx}`).value, 0, 999);
+      });
+
+      saveState(state);
+      renderTeamList();
+      renderPokemonEditor();
+      renderBattleSelectors();
+      renderBattleAll();
+      toast("저장됨");
+    };
+  }
+}
+
+// ===================== 배틀 매핑 =====================
+
+function leftKey(){ return battle().viewSwapped ? battle().rightBase : battle().leftBase; }
+function rightKey(){ return battle().viewSwapped ? battle().leftBase : battle().rightBase; }
+function keyToTrainerId(k){ return k==="A" ? battle().aTrainerId : battle().bTrainerId; }
+function keyToActiveIndex(k){ return k==="A" ? battle().aActive : battle().bActive; }
+function keyToHpArr(k){ return k==="A" ? battle().aHp : battle().bHp; }
+function keyToStatusArr(k){ return k==="A" ? battle().aStatus : battle().bStatus; }
+
+function getActiveDataByKey(k){
+  const tid = keyToTrainerId(k);
+  const t = getTrainerById(tid);
+  const idx = keyToActiveIndex(k);
+  const p = t.team[idx];
+  const stArr = keyToStatusArr(k);
+  const hpArr = keyToHpArr(k);
+  return { k, t, idx, p, st: stArr[idx], stArr, hpArr };
+}
+
+// ===================== 배틀 셀렉터 =====================
+
+function renderBattleSelectors(){
+  if(!$("battle-a-trainer") || !$("battle-b-trainer")) return;
+
+  $("battle-a-trainer").innerHTML = trainerOptions();
+  $("battle-b-trainer").innerHTML = trainerOptions();
+
+  if(!battle().aTrainerId) battle().aTrainerId = state.trainers[0]?.id ?? null;
+  if(!battle().bTrainerId) battle().bTrainerId = state.trainers[1]?.id ?? state.trainers[0]?.id ?? null;
+
+  $("battle-a-trainer").value = battle().aTrainerId;
+  $("battle-b-trainer").value = battle().bTrainerId;
+
+  const ta = getTrainerById(battle().aTrainerId);
+  const tb = getTrainerById(battle().bTrainerId);
+
+  if($("battle-a-active")){
+    $("battle-a-active").innerHTML = pokemonOptions(ta.team);
+    $("battle-a-active").value = String(battle().aActive);
+  }
+  if($("battle-b-active")){
+    $("battle-b-active").innerHTML = pokemonOptions(tb.team);
+    $("battle-b-active").value = String(battle().bActive);
+  }
+}
+
+if ($("battle-a-trainer")) {
+  $("battle-a-trainer").addEventListener("change", e=>{
+    battle().aTrainerId = e.target.value;
+    battle().aActive = 0;
+    renderBattleSelectors();
+    renderBattleAll();
+  });
+}
+if ($("battle-b-trainer")) {
+  $("battle-b-trainer").addEventListener("change", e=>{
+    battle().bTrainerId = e.target.value;
+    battle().bActive = 0;
+    renderBattleSelectors();
+    renderBattleAll();
+  });
+}
+if ($("battle-a-active")) {
+  $("battle-a-active").addEventListener("change", e=>{
+    battle().aActive = clampInt(e.target.value,0,5);
+    renderBattleAll();
+  });
+}
+if ($("battle-b-active")) {
+  $("battle-b-active").addEventListener("change", e=>{
+    battle().bActive = clampInt(e.target.value,0,5);
+    renderBattleAll();
+  });
+}
+
+// ===================== 배틀 시작/출전 =====================
+
+function battleInitHPAndStatus(){
+  const ta = getTrainerById(battle().aTrainerId);
+  const tb = getTrainerById(battle().bTrainerId);
+  battle().aHp = ta.team.map(p => derivedStats(p).hp);
+  battle().bHp = tb.team.map(p => derivedStats(p).hp);
+  battle().aStatus = Array.from({length:6},()=>makeStatusState());
+  battle().bStatus = Array.from({length:6},()=>makeStatusState());
+  battle().sideCond = makeSideCond();
+}
+
+function sendOutByKey(k, idx){
+  const tid = keyToTrainerId(k);
+  const t = getTrainerById(tid);
+  const p = t.team[idx];
+  logAdd(`${t.name}은(는) ${pokeNick(p)}(${pokeOrig(p)})을(를) 내보냈다!`);
+}
+
+function ensureBattleStarted(){
+  if(battle().started) return true;
+
+  if(!battle().aTrainerId) battle().aTrainerId = state.trainers[0]?.id ?? null;
+  if(!battle().bTrainerId) battle().bTrainerId = state.trainers[1]?.id ?? state.trainers[0]?.id ?? null;
+
+  const ta = getTrainerById(battle().aTrainerId);
+  const tb = getTrainerById(battle().bTrainerId);
+
+  const aP = ta.team[battle().aActive];
+  const bP = tb.team[battle().bActive];
+
+  if(!aP || !bP) return false;
+  if(!isFilledPokemon(aP)) { toast("선공 출전 포켓몬: 타입/레벨 필요"); return false; }
+  if(!isFilledPokemon(bP)) { toast("후공 출전 포켓몬: 타입/레벨 필요"); return false; }
+
+  battleInitHPAndStatus();
+  battle().started = true;
+  battle().turn = 1;
+  battle().viewSwapped = false;
+  battle().actedInTurn = 0;
+  battle().leftBase = "A";
+  battle().rightBase = "B";
+
+  if(!battle().startedOnceLogged){
+    battle().startedOnceLogged = true;
+    logAdd(`배틀 시작!`);
+    logAdd(`${ta.name} VS ${tb.name}`);
+    logAdd(`${ta.name}은(는) ${pokeNick(aP)}(${pokeOrig(aP)})을(를) 내보냈다!`);
+    logAdd(`${tb.name}은(는) ${pokeNick(bP)}(${pokeOrig(bP)})을(를) 내보냈다!`);
+  }
+  return true;
+}
+
+// ===================== 지속/턴 종료 =====================
+
+function firstAliveIndex(hp){
+  for(let i=0;i<hp.length;i++) if(hp[i] > 0) return i;
+  return -1;
+}
+function weatherTickLine(kind){
+  switch(kind){
+    case "sun": return "햇살이 쨍쨍하다!";
+    case "rain": return "비가 내린다!";
+    case "sand": return "모래바람이 휘몰아친다!";
+    case "snow": return "설경이 이어지고 있다!";
+    default: return "";
+  }
+}
+function weatherEndLine(kind){
+  switch(kind){
+    case "sun": return "햇살이 약해졌다!";
+    case "rain": return "비가 그쳤다!";
+    case "sand": return "모래바람이 잦아들었다!";
+    case "snow": return "설경이 끝났다!";
+    default: return "";
+  }
+}
+
+function maybeSwitchInAfterFaint(k){
+  const hpArr = keyToHpArr(k);
+  const next = firstAliveIndex(hpArr);
+  if(next < 0) return;
+
+  if(k==="A") battle().aActive = next;
+  else battle().bActive = next;
+
+  sendOutByKey(k, next);
+}
+
+function applyResidualForKey(k){
+  const { idx, p, hpArr, stArr } = getActiveDataByKey(k);
+  if(!p) return;
+  if(hpArr[idx] <= 0) return;
+
+  const d = derivedStats(p);
+  const st = stArr[idx];
+  const name = pokeNick(p);
+
+  if(st.major==="brn"){
+    const dmg = Math.max(1, Math.floor(d.hp / 16));
+    hpArr[idx] = Math.max(0, hpArr[idx] - dmg);
+    logAdd(`${name}은(는) 화상 때문에 ${dmg}의 대미지를 입었다!`);
+    logAdd(`${name}의 남은 HP: ${hpArr[idx]}/${d.hp}`);
+  }
+  if(st.major==="psn"){
+    const dmg = Math.max(1, Math.floor(d.hp / 8));
+    hpArr[idx] = Math.max(0, hpArr[idx] - dmg);
+    logAdd(`${name}은(는) 독 때문에 ${dmg}의 대미지를 입었다!`);
+    logAdd(`${name}의 남은 HP: ${hpArr[idx]}/${d.hp}`);
+  }
+  if(st.major==="tox"){
+    if(st.toxicCount < 1) st.toxicCount = 1;
+    const dmg = Math.max(1, Math.floor(d.hp / 16) * st.toxicCount);
+    hpArr[idx] = Math.max(0, hpArr[idx] - dmg);
+    logAdd(`${name}은(는) 맹독 때문에 ${dmg}의 대미지를 입었다!`);
+    logAdd(`${name}의 남은 HP: ${hpArr[idx]}/${d.hp}`);
+    st.toxicCount += 1;
+  }
+
+  const w = battle().weather.kind;
+  if(w==="sand"){
+    const types = [d.type1,d.type2].filter(Boolean);
+    const immune = (types.includes("바위") || types.includes("땅") || types.includes("강철"));
+    if(!immune){
+      const dmg = Math.max(1, Math.floor(d.hp / 16));
+      hpArr[idx] = Math.max(0, hpArr[idx] - dmg);
+      logAdd(`${name}은(는) 모래바람 때문에 ${dmg}의 대미지를 입었다!`);
+      logAdd(`${name}의 남은 HP: ${hpArr[idx]}/${d.hp}`);
+    }
+  }
+
+  if(hpArr[idx] === 0){
+    logAdd(`${name}은(는) 쓰러졌다!`);
+    maybeSwitchInAfterFaint(k);
+  }
+}
+
+function endOfTurnTick(){
+  const kind = battle().weather.kind;
+  if(kind!=="none"){
+    const line = weatherTickLine(kind);
+    if(line) logAdd(line);
+  }
+
+  applyResidualForKey("A");
+  applyResidualForKey("B");
+
+  if(battle().weather.kind!=="none" && battle().weather.turns > 0){
+    battle().weather.turns -= 1;
+    if(battle().weather.turns <= 0){
+      const endLine = weatherEndLine(battle().weather.kind);
+      battle().weather = { kind:"none", turns:0 };
+      if(endLine) logAdd(endLine);
+    }
+  }
+
+  battle().turn += 1;
+
+  const aAlive = battle().aHp.some(h=>h>0);
+  const bAlive = battle().bHp.some(h=>h>0);
+  if(!aAlive || !bAlive){
+    logAdd(`배틀 종료! 승자: ${aAlive ? "선공" : bAlive ? "후공" : "무승부"}`);
+    battle().started = false;
+  }
+}
+
+// ===================== 상태/행동불능 =====================
+
+function statusApplyLine(name, st, sleepTurns){
+  switch(st){
+    case "par": return `${name}은(는) 마비에 걸렸다!`;
+    case "brn": return `${name}은(는) 화상을 입었다!`;
+    case "psn": return `${name}은(는) 독에 걸렸다!`;
+    case "tox": return `${name}은(는) 맹독에 걸렸다!`;
+    case "slp": return `${name}은(는) 잠들어 버렸다! (수면 ${sleepTurns}턴)`;
+    case "frz": return `${name}은(는) 얼어붙었다!`;
+    default: return `${name}의 상태가 회복되었다!`;
+  }
+}
+function canActByKey(k){
+  const { p, st } = getActiveDataByKey(k);
+  const pName = pokeNick(p);
+
+  if(st.flinch){
+    st.flinch = false;
+    logAdd(`${pName}은(는) 풀죽어서 움직일 수 없었다!`);
+    return false;
+  }
+  if(st.major==="slp"){
+    if(st.sleepTurns > 0){
+      logAdd(`${pName}은(는) 잠들어 있다!`);
+      st.sleepTurns -= 1;
+      if(st.sleepTurns <= 0){
+        st.major = "none";
+        logAdd(`${pName}은(는) 잠에서 깼다!`);
+        return true;
+      }
+      return false;
+    }else{
+      st.major = "none";
+      logAdd(`${pName}은(는) 잠에서 깼다!`);
+      return true;
+    }
+  }
+  if(st.major==="frz"){
+    if(Math.random() < 0.2){
+      st.major = "none";
+      logAdd(`${pName}은(는) 얼음 상태에서 풀렸다!`);
+      return true;
+    }
+    logAdd(`${pName}은(는) 얼어붙어 움직일 수 없었다!`);
+    return false;
+  }
+  if(st.major==="par"){
+    if(Math.random() < 0.25){
+      logAdd(`${pName}은(는) 몸이 마비되어 움직일 수 없었다!`);
+      return false;
+    }
+  }
+  return true;
+}
+
+// ===================== 데미지 계산 =====================
+
+function weatherMoveMultiplier(weatherKind, moveType){
+  if(weatherKind === "rain"){
+    if(moveType==="물") return 1.5;
+    if(moveType==="불꽃") return 0.5;
+  }
+  if(weatherKind === "sun"){
+    if(moveType==="불꽃") return 1.5;
+    if(moveType==="물") return 0.5;
+  }
+  return 1.0;
+}
+function weatherDefMultiplier(weatherKind, defenderTypes, moveCat){
+  if(weatherKind === "snow" && moveCat==="physical"){
+    if(defenderTypes.includes("얼음")) return 1.5;
+  }
+  if(weatherKind === "sand" && moveCat==="special"){
+    if(defenderTypes.includes("바위")) return 1.5;
+  }
+  return 1.0;
+}
+function burnAtkMultiplier(attackerStatus, moveCat){
+  if(attackerStatus.major==="brn" && moveCat==="physical") return 0.5;
+  return 1.0;
+}
+function screenMultiplierFor(move, cond){
+  if(!cond) return 1.0;
+  if(move.cat === "status" || move.power === 0) return 1.0;
+  if(cond.auroraveil) return 0.5;
+  if(move.cat === "physical" && cond.reflect) return 0.5;
+  if(move.cat === "special"  && cond.lightscreen) return 0.5;
+  return 1.0;
+}
+
+function calcDamage({att, def, move, attStatus, weather, screenMul=1, rand=null}){
+  const L = att.level;
+  const P = clampInt(move.power, 0, 999);
+  if(move.cat === "status" || P === 0) return { damage: 0, eff: 1 };
+
+  let A = (move.cat === "physical") ? att.atk : att.spa;
+  let D = (move.cat === "physical") ? def.def : def.spd;
+
+  A = Math.floor(A * burnAtkMultiplier(attStatus, move.cat));
+  D = Math.floor(D * weatherDefMultiplier(weather.kind, [def.type1, def.type2].filter(Boolean), move.cat));
+  if(D < 1) D = 1;
+
+  const base1 = Math.floor((Math.floor((2 * L) / 5) + 2) * P * A / D);
+  const base2 = Math.floor(base1 / 50) + 2;
+
+  const stab = (move.type && (move.type === att.type1 || move.type === att.type2)) ? 1.5 : 1.0;
+  const eff  = typeEffect(move.type, def.type1, def.type2);
+  const wMul = weatherMoveMultiplier(weather.kind, move.type);
+  const r    = (rand == null) ? (0.85 + Math.random() * 0.15) : rand;
+
+  let dmg = Math.floor(base2 * stab * eff * wMul * screenMul * r);
+  if (eff === 0) dmg = 0;
+  if (eff > 0 && dmg < 1) dmg = 1;
+
+  return { damage: dmg, eff };
+}
+
+// 현재 좌측(공격측) 선택 기술
+function getCurrentLeftMove(){
+  const LK = leftKey();
+  const { p } = getActiveDataByKey(LK);
+  if(!p){
+    return { name:"기술", type:"노말", cat:"physical", power:0 };
+  }
+  ensureMoves(p);
+  const sel = $("move-l-slot");
+  const idx = sel ? clampInt(sel.value, 0, 3) : 0;
+  const m = p.moves[idx] || {};
+  return {
+    name: (m.name ?? "").trim() || "기술",
+    type: m.type || "노말",
+    cat:  m.cat  || "physical",
+    power: clampInt(m.power ?? 0, 0, 999)
+  };
+}
+
+function moveCatLabel(cat){
+  if(cat==="physical") return "물리";
+  if(cat==="special")  return "특수";
+  return "변화";
+}
+
+// ===================== 배틀 UI =====================
+
+function statusLabel(st, cond){
+  const baseLabel = STATUS.find(x=>x.key===st.major)?.label ?? "없음";
+  const parts = [];
+  if(st.major!=="none") parts.push(baseLabel);
+  if(st.major==="slp") parts.push(`(${st.sleepTurns}턴)`);
+  if(st.major==="tox") parts.push(`(${st.toxicCount})`);
+  if(st.flinch) parts.push("풀죽음");
+  if(cond?.protect) parts.push("방어(1회)");
+  return parts.length ? parts.join(" ") : "없음";
+}
+function shortMajorStatus(st){
+  if(!st || st.major==="none") return "없음";
+  return STATUS.find(x=>x.key===st.major)?.label ?? "없음";
+}
+function typeLabel(d){
+  return [d.type1,d.type2].filter(Boolean).join("/") || "(미입력)";
+}
+function hpPercent(cur, max){
+  if(max<=0) return 0;
+  return Math.max(0, Math.min(100, Math.round((cur/max)*100)));
+}
+
+function renderStatusCards(){
+  if(!$("battle-current-status")) return;
+
+  const LK = leftKey();
+  const RK = rightKey();
+
+  const Lt = getTrainerById(keyToTrainerId(LK));
+  const Rt = getTrainerById(keyToTrainerId(RK));
+
+  const Li = keyToActiveIndex(LK);
+  const Ri = keyToActiveIndex(RK);
+
+  const Lp = Lt.team[Li];
+  const Rp = Rt.team[Ri];
+
+  const Ld = derivedStats(Lp);
+  const Rd = derivedStats(Rp);
+
+  const LhpArr = keyToHpArr(LK);
+  const RhpArr = keyToHpArr(RK);
+  const LsArr = keyToStatusArr(LK);
+  const RsArr = keyToStatusArr(RK);
+
+  const Lcur = battle().started ? LhpArr[Li] : Ld.hp;
+  const Rcur = battle().started ? RhpArr[Ri] : Rd.hp;
+
+  const Lmax = Ld.hp;
+  const Rmax = Rd.hp;
+
+  const Lst = battle().started ? LsArr[Li] : makeStatusState();
+  const Rst = battle().started ? RsArr[Ri] : makeStatusState();
+
+  const Lcond = getSideCond(LK);
+  const Rcond = getSideCond(RK);
+
+  $("battle-current-status").innerHTML = `
+    <div class="scard attacker">
+      <div class="sc-head">
+        <div>
+          <div class="sc-title">공격측</div>
+          <div class="sc-sub">${escapeHtml(trainerPokeLabel(Lt, Lp))}</div>
+        </div>
+      </div>
+      <div class="badges">
+        <div class="badge">포켓몬: ${escapeHtml(pokeOrig(Lp))}</div>
+        <div class="badge">타입: ${escapeHtml(typeLabel(Ld))}</div>
+        <div class="badge">상태: ${escapeHtml(statusLabel(Lst, Lcond))}</div>
+        <div class="badge">Lv: ${escapeHtml(String(Ld.level))}</div>
+      </div>
+      <div class="hpbar"><div class="hpfill" style="width:${hpPercent(Lcur,Lmax)}%"></div></div>
+      <div class="hptext">HP ${battle().started ? `${Lcur}/${Lmax}` : `${Lmax}`}</div>
+    </div>
+
+    <div class="scard">
+      <div class="sc-head">
+        <div>
+          <div class="sc-title">수비측</div>
+          <div class="sc-sub">${escapeHtml(trainerPokeLabel(Rt, Rp))}</div>
+        </div>
+      </div>
+      <div class="badges">
+        <div class="badge">포켓몬: ${escapeHtml(pokeOrig(Rp))}</div>
+        <div class="badge">타입: ${escapeHtml(typeLabel(Rd))}</div>
+        <div class="badge">상태: ${escapeHtml(statusLabel(Rst, Rcond))}</div>
+        <div class="badge">Lv: ${escapeHtml(String(Rd.level))}</div>
+      </div>
+      <div class="hpbar"><div class="hpfill" style="width:${hpPercent(Rcur,Rmax)}%"></div></div>
+      <div class="hptext">HP ${battle().started ? `${Rcur}/${Rmax}` : `${Rmax}`}</div>
+    </div>
+  `;
+}
+
+function renderWeatherBar(){
+  if(!$("battle-weather")) return;
+  const w = battle().weather;
+  const label = WEATHER.find(x=>x.key===w.kind)?.label ?? "없음";
+  $("battle-weather").textContent = (w.kind==="none") ? `날씨: 없음` : `날씨: ${label} (남은 ${w.turns})`;
+}
+
+function renderStatusSummary(){
+  const el = $("battle-status-summary");
+  if(!el) return;
+  if(!battle().started){
+    el.textContent = "상태: -";
+    return;
+  }
+  const LK = leftKey();
+  const RK = rightKey();
+  const Li = keyToActiveIndex(LK);
+  const Ri = keyToActiveIndex(RK);
+  const Lst = keyToStatusArr(LK)[Li];
+  const Rst = keyToStatusArr(RK)[Ri];
+  el.textContent = `상태: 공격측 ${shortMajorStatus(Lst)} / 수비측 ${shortMajorStatus(Rst)}`;
+}
+
+function renderPills(){
+  if($("pill-turn")) $("pill-turn").textContent = battle().started ? `턴: ${battle().turn}` : `턴: -`;
+
+  if(!battle().started){
+    if($("pill-facing")) $("pill-facing").textContent = `현재: -`;
+    if($("act-hint")) $("act-hint").textContent = `행동 실행을 누르면 자동으로 배틀이 시작됩니다.`;
+    renderStatusSummary();
+    return;
+  }
+
+  const LK = leftKey();
+  const RK = rightKey();
+  const Lt = getTrainerById(keyToTrainerId(LK));
+  const Rt = getTrainerById(keyToTrainerId(RK));
+  const Li = keyToActiveIndex(LK);
+  const Ri = keyToActiveIndex(RK);
+  const Lp = Lt.team[Li];
+  const Rp = Rt.team[Ri];
+
+  if($("pill-facing")) $("pill-facing").textContent = `현재: ${trainerPokeLabel(Lt,Lp)} → ${trainerPokeLabel(Rt,Rp)}`;
+
+  if($("act-hint")) {
+    $("act-hint").textContent =
+      `이번 클릭: ${pokeNick(Lp)} 공격 → 이후 자동 좌우 교대`;
+  }
+
+  renderStatusSummary();
+}
+
+function renderMoveTitles(){
+  if(!$("left-move-title")) return;
+
+  const LK = leftKey();
+  const RK = rightKey();
+  const Lt = getTrainerById(keyToTrainerId(LK));
+  const Rt = getTrainerById(keyToTrainerId(RK));
+  const Li = keyToActiveIndex(LK);
+  const Ri = keyToActiveIndex(RK);
+  const Lp = Lt.team[Li];
+  const Rp = Rt.team[Ri];
+
+  $("left-move-title").textContent = `공격측: ${trainerPokeLabel(Lt, Lp)}`;
+  if($("right-move-title")) $("right-move-title").textContent = `수비측: ${trainerPokeLabel(Rt, Rp)}`;
+}
+
+// 공격측 기술 선택 UI
+function renderMoveSelector(){
+  const sel = $("move-l-slot");
+  if(!sel) return;
+
+  const LK = leftKey();
+  const { p } = getActiveDataByKey(LK);
+
+  if(!p){
+    sel.innerHTML = `<option value="0">기술 없음</option>`;
+    $("move-l-type-label").textContent   = "-";
+    $("move-l-cat-label").textContent    = "-";
+    $("move-l-power-label").textContent  = "-";
+    return;
+  }
+
+  ensureMoves(p);
+  const prev = clampInt(sel.value, 0, 3);
+
+  sel.innerHTML = p.moves.map((m, i)=>{
+    const name = (m.name ?? "").trim() || `기술${i+1}`;
+    const type = m.type || "-";
+    const cat  = moveCatLabel(m.cat);
+    const pow  = m.power ?? 0;
+    return `<option value="${i}">${i+1}. ${escapeHtml(name)} (${type}/${cat}/${pow})</option>`;
+  }).join("");
+
+  sel.value = String(Math.min(prev, 3));
+  updateMoveLabels();
+}
+
+function updateMoveLabels(){
+  const info = getCurrentLeftMove();
+  if($("move-l-type-label"))  $("move-l-type-label").textContent  = info.type;
+  if($("move-l-cat-label"))   $("move-l-cat-label").textContent   = moveCatLabel(info.cat);
+  if($("move-l-power-label")) $("move-l-power-label").textContent = String(info.power);
+}
+
+// 상태 대상 셀렉트 라벨
+function updateStatusTargetLabels(){
+  const sel = $("status-target");
+  if(!sel) return;
+
+  const LK = leftKey();
+  const RK = rightKey();
+
+  const Lt = getTrainerById(keyToTrainerId(LK));
+  const Rt = getTrainerById(keyToTrainerId(RK));
+
+  const Li = keyToActiveIndex(LK);
+  const Ri = keyToActiveIndex(RK);
+
+  const Lp = Lt.team[Li];
+  const Rp = Rt.team[Ri];
+
+  const opts = sel.options;
+  if(opts.length >= 1 && Lp){
+    opts[0].textContent = `공격측: ${trainerPokeLabel(Lt, Lp)}`;
+  }
+  if(opts.length >= 2 && Rp){
+    opts[1].textContent = `수비측: ${trainerPokeLabel(Rt, Rp)}`;
+  }
+}
+
+function renderBattleAll(){
+  renderBattleSelectors();
+  renderWeatherBar();
+  renderPills();
+  renderMoveTitles();
+  renderStatusCards();
+  updateStatusTargetLabels();
+  renderMoveSelector();
+  renderLog();
+}
+
+// ===================== 날씨/상태 버튼 =====================
+
+function getSideByLR(lr){
+  return (lr==="L") ? leftKey() : rightKey();
+}
+
+if($("btn-apply-weather")) $("btn-apply-weather").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("날씨 적용");
+
+  const kind = $("weather-kind").value;
+  const turns = clampInt($("weather-turns").value, 0, 999);
+
+  battle().weather.kind = kind;
+  battle().weather.turns = (kind==="none") ? 0 : turns;
+
+  const startLine = (()=>{
+    switch(kind){
+      case "sun": return "햇살이 강해지기 시작했다!";
+      case "rain": return "비가 내리기 시작했다!";
+      case "sand": return "모래바람이 몰아치기 시작했다!";
+      case "snow": return "설경이 시작되었다!";
+      default: return "날씨가 평온해졌다!";
+    }
+  })();
+  logAdd(startLine);
+  renderBattleAll();
+};
+
+if($("btn-clear-weather")) $("btn-clear-weather").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("날씨 해제");
+  const prev = battle().weather.kind;
+  battle().weather = { kind:"none", turns:0 };
+  logAdd(prev==="none" ? "날씨는 이미 없다." : "날씨가 평온해졌다!");
+  renderBattleAll();
+};
+
+if($("btn-apply-status")) $("btn-apply-status").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("상태 적용");
+
+  const lr = $("status-target").value;
+  const kind = $("status-kind").value;
+  const sleepTurns = clampInt($("sleep-turns").value, 1, 10);
+
+  const k = getSideByLR(lr);
+  const { p, st } = getActiveDataByKey(k);
+  if(!p) return;
+
+  const name = pokeNick(p);
+
+  st.major = kind;
+  st.sleepTurns = (kind==="slp") ? sleepTurns : 0;
+  st.toxicCount = (kind==="tox") ? 1 : 0;
+  if(kind==="none"){ st.sleepTurns=0; st.toxicCount=0; }
+
+  logAdd(statusApplyLine(name, kind, sleepTurns));
+  renderBattleAll();
+};
+
+if($("btn-clear-status")) $("btn-clear-status").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("상태 해제");
+
+  const lr = $("status-target").value;
+  const k = getSideByLR(lr);
+  const { p, st } = getActiveDataByKey(k);
+  if(!p) return;
+
+  const name = pokeNick(p);
+
+  st.major = "none";
+  st.sleepTurns = 0;
+  st.toxicCount = 0;
+  st.flinch = false;
+
+  logAdd(`${name}의 상태가 회복되었다!`);
+  renderBattleAll();
+};
+
+// 리플렉터/빛의장막/오로라베일/방어(1회)
+if($("btn-toggle-reflect")) $("btn-toggle-reflect").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("리플렉터");
+  const lr = $("status-target").value;
+  const k = getSideByLR(lr);
+  const cond = getSideCond(k);
+  cond.reflect = !cond.reflect;
+  const { p } = getActiveDataByKey(k);
+  const name = pokeNick(p);
+  logAdd(`${name}의 리플렉터가 ${cond.reflect ? "전개되었다!" : "사라졌다!"}`);
+  renderBattleAll();
+};
+
+if($("btn-toggle-lightscreen")) $("btn-toggle-lightscreen").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("빛의장막");
+  const lr = $("status-target").value;
+  const k = getSideByLR(lr);
+  const cond = getSideCond(k);
+  cond.lightscreen = !cond.lightscreen;
+  const { p } = getActiveDataByKey(k);
+  const name = pokeNick(p);
+  logAdd(`${name}의 빛의장막이 ${cond.lightscreen ? "전개되었다!" : "사라졌다!"}`);
+  renderBattleAll();
+};
+
+if($("btn-toggle-auroraveil")) $("btn-toggle-auroraveil").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("오로라베일");
+  const lr = $("status-target").value;
+  const k = getSideByLR(lr);
+  const cond = getSideCond(k);
+  cond.auroraveil = !cond.auroraveil;
+  const { p } = getActiveDataByKey(k);
+  const name = pokeNick(p);
+  logAdd(`${name}의 오로라베일이 ${cond.auroraveil ? "전개되었다!" : "사라졌다!"}`);
+  renderBattleAll();
+};
+
+if($("btn-apply-protect")) $("btn-apply-protect").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("방어(1회)");
+  const lr = $("status-target").value;
+  const k = getSideByLR(lr);
+  const cond = getSideCond(k);
+  cond.protect = true;
+  renderBattleAll();
+};
+
+if($("btn-tick-only")) $("btn-tick-only").onclick = ()=>{
+  if(!ensureBattleStarted()) return;
+  pushUndo("턴 종료 처리(수동)");
+  logAdd(`--- ${battle().turn}턴 종료 처리(수동) ---`);
+  endOfTurnTick();
+  battle().actedInTurn = 0;
+  battle().viewSwapped = false;
+  renderBattleAll();
+};
+
+// ===================== 버튼: 스왑 + 행동 실행 =====================
+
+function swapActionButtons(){
+  const btnSwap = $("btn-quick-range");
+  const btnAct = $("btn-act");
+  if(!btnSwap || !btnAct) return;
+
+  btnSwap.textContent = "좌/우 스왑";
+  btnSwap.onclick = ()=>{
+    if(!ensureBattleStarted()) return;
+    pushUndo("좌/우 스왑");
+    battle().viewSwapped = !battle().viewSwapped;
+    renderBattleAll();
+  };
+
+  btnAct.textContent = "행동 실행";
+  btnAct.onclick = ()=>{
+    if(!ensureBattleStarted()) return;
+    pushUndo("행동 실행(대미지+좌우 스왑)");
+
+    const LK = leftKey();
+    const RK = rightKey();
+
+    const L = getActiveDataByKey(LK);
+    const R = getActiveDataByKey(RK);
+
+    if(L.hpArr[L.idx] <= 0) return toast("공격측 포켓몬이 이미 쓰러져 있습니다.");
+    if(R.hpArr[R.idx] <= 0) return toast("수비측 포켓몬이 이미 쓰러져 있습니다.");
+
+    const move = getCurrentLeftMove();
+    logAdd(`--- ${battle().turn}턴 (${battle().actedInTurn===0 ? "1번째 행동" : "2번째 행동"}) ---`);
+
+    const atkName = pokeNick(L.p);
+    const defName = pokeNick(R.p);
+
+    if(!canActByKey(LK)){
+      // 행동불능: 대사만 출력됨
+    } else {
+      logAdd(`${atkName}은(는) ${move.name}을(를) 사용했다!`);
+
+      if(move.cat==="status" || move.power===0){
+        // 변화기: 효과는 수동으로 처리
+      } else {
+        const defCond = getSideCond(RK);
+
+        // 방어(1회)
+        if(defCond && defCond.protect){
+          defCond.protect = false;
+          // 실제 게임 대사에 최대한 맞춰서, 공격 무효화만 출력
+          logAdd(`${defName}은(는) 몸을 지켜 공격을 막았다!`);
+        } else {
+          const Ld = derivedStats(L.p);
+          const Rd = derivedStats(R.p);
+          const screenMul = screenMultiplierFor(move, defCond);
+
+          const res = calcDamage({
+            att: Ld, def: Rd, move,
+            attStatus: L.st,
+            weather: battle().weather,
+            screenMul
+          });
+
+          if(res.eff===0){
+            logAdd(`하지만 ${defName}에게는 효과가 없었다!`);
+          } else {
+            R.hpArr[R.idx] = Math.max(0, R.hpArr[R.idx] - res.damage);
+            logAdd(`${defName}은(는) ${res.damage}의 대미지를 입었다!`);
+
+            const t = effText(res.eff);
+            if(t) logAdd(t);
+
+            const maxHp = derivedStats(R.p).hp;
+            logAdd(`${defName}의 남은 HP: ${R.hpArr[R.idx]}/${maxHp}`);
+
+            if(R.hpArr[R.idx]===0){
+              logAdd(`${defName}은(는) 쓰러졌다!`);
+              maybeSwitchInAfterFaint(RK);
+            }
+          }
+        }
+      }
+    }
+
+    battle().viewSwapped = !battle().viewSwapped;
+    battle().actedInTurn += 1;
+
+    if(battle().started && battle().actedInTurn >= 2){
+      logAdd(`--- ${battle().turn}턴 종료 ---`);
+      endOfTurnTick();
+      battle().actedInTurn = 0;
+      battle().viewSwapped = false;
+    }
+
+    renderBattleAll();
+  };
+}
+
+// ===================== 초기화 =====================
+
+function syncAll(){
+  polishStaticTexts();
+  ensureStatusSummaryPill();
+
+  if($("move-l-slot")){
+    if(!$("move-l-type-label")){}
+  }
+  if($("weather-kind")) fillWeatherSelect();
+  if($("status-kind")) { fillStatusSelect(); syncSleepUI(); }
+
+  if(!ui.selectedTrainerId || !state.trainers.some(t=>t.id===ui.selectedTrainerId)){
+    ui.selectedTrainerId = state.trainers[0]?.id ?? null;
+  }
+
+  if($("trainer-select")) renderTrainerSelect();
+  if($("team-list")) renderTeamList();
+  if($("poke-editor")) renderPokemonEditor();
+
+  if(!battle().aTrainerId) battle().aTrainerId = state.trainers[0]?.id ?? null;
+  if(!battle().bTrainerId) battle().bTrainerId = state.trainers[1]?.id ?? state.trainers[0]?.id ?? null;
+
+  renderBattleAll();
+  swapActionButtons();
+  setTab("data");
+
+  if($("move-l-slot")){
+    $("move-l-slot").addEventListener("change", updateMoveLabels);
+  }
+
+  if($("move-l-type")){
+    fillTypeSelect($("move-l-type"));
+    $("move-l-type").value = "노말";
+  }
+}
+syncAll();
+
+// ===================== 토스트 =====================
+
+let toastTimer = null;
+function toast(msg){
+  clearTimeout(toastTimer);
+  let el = document.getElementById("toast");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "toast";
+    el.style.position = "fixed";
+    el.style.left = "50%";
+    el.style.bottom = "16px";
+    el.style.transform = "translateX(-50%)";
+    el.style.padding = "10px 12px";
+    el.style.borderRadius = "10px";
+    el.style.border = "1px solid #e5e5e5";
+    el.style.background = "#111";
+    el.style.color = "#fff";
+    el.style.fontWeight = "900";
+    el.style.fontSize = "13px";
+    el.style.zIndex = "9999";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = "1";
+  toastTimer = setTimeout(()=>{ el.style.opacity = "0"; }, 1200);
+}
